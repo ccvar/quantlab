@@ -339,6 +339,7 @@ export const enUS = {
     runningBacktest: "Running",
     equityCurveSim: "Equity Curve (Sim)",
     benchmarkHold: "Benchmark (Buy & Hold)",
+    chartAttribution: "Charts by TradingView",
     lastUpdate: "Last Update",
     endingEquity: "Ending Equity",
     return: "Return",

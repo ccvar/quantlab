@@ -339,6 +339,7 @@ export const zhCN = {
     runningBacktest: "运行中",
     equityCurveSim: "权益曲线（模拟）",
     benchmarkHold: "基准（买入持有）",
+    chartAttribution: "图表来自 TradingView",
     lastUpdate: "最后更新",
     endingEquity: "期末权益",
     return: "收益",

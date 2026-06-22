@@ -3381,8 +3381,8 @@ function TopBar({
         </button>
       </div>
 
-      <MetricTile label={t("top.simCapital", "Sim Capital")} value={`${formatMoney(meta.simCapital)} USDT`} />
-      <MetricTile label={t("top.dailyPnl", "Daily PnL")} value={`+${formatMoney(meta.dailyPnl)} USDT`} sub={`+${meta.dailyPnlPct.toFixed(2)}%`} tone="positive" />
+      <MetricTile label={t("top.simCapital", "Sim Capital")} value={formatMoney(meta.simCapital)} unit="USDT" density="wide" />
+      <MetricTile label={t("top.dailyPnl", "Daily PnL")} value={`+${formatMoney(meta.dailyPnl)}`} unit="USDT" sub={`+${meta.dailyPnlPct.toFixed(2)}%`} tone="positive" density="wide" />
       <MetricTile label={t("top.dailyDrawdown", "Daily Drawdown")} value={`${meta.dailyDrawdown.toFixed(2)}%`} tone="negative" />
 
       <button className={classNames("stop-all", isStopped && "active")} type="button" onClick={onToggleKillSwitch} title={killSwitch?.message}>
@@ -3418,11 +3418,14 @@ function Segmented({ value, values, onChange, icon, tone, labelFor }) {
   );
 }
 
-function MetricTile({ label, value, sub, tone }) {
+function MetricTile({ label, value, unit, sub, tone, density }) {
   return (
-    <div className={classNames("metric-tile", tone)}>
+    <div className={classNames("metric-tile", tone, density && `metric-${density}`)}>
       <span className="label">{label}</span>
-      <strong>{value}</strong>
+      <strong className="metric-value">
+        <span className="metric-number">{value}</span>
+        {unit ? <span className="metric-unit">{unit}</span> : null}
+      </strong>
       {sub ? <small>{sub}</small> : null}
     </div>
   );
@@ -3785,6 +3788,9 @@ function ChartWorkspace({
         <span>{meta.selectedMarket} - {timeframe} - {meta.dataSource}</span>
         <span>O {numberFormat.format(lastCandle.open)} H {numberFormat.format(lastCandle.high)} L {numberFormat.format(lastCandle.low)} C {numberFormat.format(lastCandle.close)}</span>
         <strong>+{(lastCandle.close - lastCandle.open).toFixed(1)} (+0.35%)</strong>
+        <a className="chart-attribution" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">
+          {t("panels.chartAttribution", "Charts by TradingView")}
+        </a>
       </div>
         </>
       )}
@@ -4078,6 +4084,7 @@ function chartOptions({ height, theme }) {
     height,
     layout: {
       background: { color: "transparent" },
+      attributionLogo: false,
       textColor: palette.text,
       fontFamily: "IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 11,
