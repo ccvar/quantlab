@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"ccvar.com/web3quant/internal/ai"
+	"ccvar.com/web3quant/internal/aiprovider"
 	"ccvar.com/web3quant/internal/audit"
 	"ccvar.com/web3quant/internal/autopilot"
 	"ccvar.com/web3quant/internal/backtest"
@@ -177,6 +178,15 @@ func main() {
 			return
 		}
 		writeJSON(w, report)
+	}))
+	mux.HandleFunc("/api/ai-providers", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeErrorJSON(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+		defer cancel()
+		writeJSON(w, aiprovider.Detect(ctx))
 	}))
 	mux.HandleFunc("/api/kill-switch", withCORS(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

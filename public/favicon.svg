@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CCVar Quant Lab">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="4" x2="54" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#102129"/>
+      <stop offset="1" stop-color="#061014"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="18" y1="17" x2="49" y2="47" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2ff2df"/>
+      <stop offset="1" stop-color="#21d4c4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="13.5" fill="none" stroke="#21d4c4" stroke-opacity=".38" stroke-width="3"/>
+  <path d="M44 24a14 14 0 1 0 0 16" fill="none" stroke="url(#mark)" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="45.5" cy="42" r="4.6" fill="#31d98c"/>
+</svg>

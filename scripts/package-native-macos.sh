@@ -48,6 +48,8 @@ lipo -create "$BUILD_DIR/ccvar-quant-darwin-arm64" "$BUILD_DIR/ccvar-quant-darwi
 cp "$BIN_DIR/ccvar-quant-darwin-universal" "$NATIVE_MACOS_DIR/ccvar-quant"
 cp "$BIN_DIR/ccvar-quant-darwin-universal" "$WEB_MACOS_DIR/ccvar-quant"
 chmod +x "$NATIVE_MACOS_DIR/ccvar-quant" "$WEB_MACOS_DIR/ccvar-quant"
+cp assets/app-icon.icns "$NATIVE_RESOURCES_DIR/app-icon.icns"
+cp assets/app-icon.icns "$WEB_RESOURCES_DIR/app-icon.icns"
 
 for target in arm64-apple-macos12.0 x86_64-apple-macos12.0; do
   xcrun --sdk macosx swiftc desktop/macos/CCVarQuantLab.swift \
@@ -73,6 +75,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
   <string>CCVar Quant Lab</string>
   <key>CFBundleIdentifier</key>
   <string>com.ccvar.quantlab.native</string>
+  <key>CFBundleIconFile</key>
+  <string>app-icon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -123,6 +127,8 @@ cat > "$WEB_APP_DIR/Contents/Info.plist" <<'PLIST'
   <string>CCVar Quant Lab Web</string>
   <key>CFBundleIdentifier</key>
   <string>com.ccvar.quantlab.weblauncher</string>
+  <key>CFBundleIconFile</key>
+  <string>app-icon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>

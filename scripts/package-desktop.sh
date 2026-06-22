@@ -46,6 +46,7 @@ GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -o "$BIN_DIR/ccvar-
 
 cp "$BIN_DIR/ccvar-quant-darwin-arm64" "$MACOS_DIR/ccvar-quant"
 chmod +x "$MACOS_DIR/ccvar-quant"
+cp assets/app-icon.icns "$MAC_RESOURCES_DIR/app-icon.icns"
 
 cat > "$MACOS_DIR/$MAC_APP_NAME" <<'APP'
 #!/bin/sh
@@ -74,6 +75,8 @@ cat > "$MAC_CONTENTS_DIR/Info.plist" <<'PLIST'
   <string>CCVar Quant Lab</string>
   <key>CFBundleIdentifier</key>
   <string>com.ccvar.quantlab</string>
+  <key>CFBundleIconFile</key>
+  <string>app-icon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -225,6 +228,7 @@ const criticalFilePaths = [
   "CCVar Quant Lab.app/Contents/Info.plist",
   "CCVar Quant Lab.app/Contents/MacOS/ccvar-quant",
   "CCVar Quant Lab.app/Contents/MacOS/CCVar Quant Lab",
+  "CCVar Quant Lab.app/Contents/Resources/app-icon.icns",
   "CCVar Quant Lab.app/Contents/Resources/README.txt",
   "CCVar Quant Lab.app/Contents/Resources/docs/operator-runbook.zh-CN.md",
   "CCVar Quant Lab.app/Contents/Resources/docs/safety.md",

@@ -50,6 +50,16 @@ export async function loadPreflight() {
   return response.json();
 }
 
+export async function loadAIProviders() {
+  const response = await fetch(`${API_BASE}/api/ai-providers`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(await readAPIError(response, `AI providers returned ${response.status}`));
+  }
+  return response.json();
+}
+
 export async function simulateStep({ exchange = "Binance", symbol = "BTCUSDT", mode = "shadow" } = {}) {
   const url = new URL(`${API_BASE}/api/simulate/step`);
   url.searchParams.set("exchange", exchange);

@@ -4,8 +4,10 @@ import {
   AlertTriangle,
   BarChart3,
   Brain,
+  Check,
   ChevronDown,
   Clock3,
+  Copy,
   Database,
   Download,
   FlaskConical,
@@ -14,14 +16,17 @@ import {
   Languages,
   LockKeyhole,
   Maximize2,
+  Moon,
   Pause,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
   Square,
+  Sun,
   Trash2,
   X,
   Zap,
@@ -38,6 +43,7 @@ import {
   deleteCredential,
   executeLive,
   exportWorkspace,
+  loadAIProviders,
   loadAppInfo,
   loadAccountSnapshot,
   loadAuditLog,
@@ -164,6 +170,28 @@ function writeStoredLocale(locale) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage?.setItem("ccvar.locale", locale);
+  } catch {
+    // Some embedded/private browser contexts disable localStorage.
+  }
+}
+
+function resolveTheme(value) {
+  return value === "light" ? "light" : "dark";
+}
+
+function readStoredTheme() {
+  if (typeof window === "undefined") return "dark";
+  try {
+    return resolveTheme(window.localStorage?.getItem("ccvar.theme"));
+  } catch {
+    return "dark";
+  }
+}
+
+function writeStoredTheme(theme) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage?.setItem("ccvar.theme", resolveTheme(theme));
   } catch {
     // Some embedded/private browser contexts disable localStorage.
   }
@@ -407,6 +435,52 @@ const defaultPreflight = {
   checks: [],
 };
 
+const defaultAIProviders = {
+  generatedAt: "",
+  providers: [
+    {
+      id: "local_policy",
+      label: "Local AI Policy",
+      kind: "local",
+      state: "ok",
+      source: "built-in",
+      model: "v0.2.0",
+      detail: "Deterministic local policy is available for shadow, paper, and guarded live validation.",
+      guidance: "No external model credentials are required for the first release.",
+    },
+    {
+      id: "codex_cli",
+      label: "Codex CLI / ChatGPT subscription",
+      kind: "subscription_cli",
+      state: "unknown",
+      command: "codex login",
+      model: "gpt-5",
+      detail: "Provider detection has not run yet.",
+      guidance: "Refresh AI configuration to detect the local Codex CLI login.",
+    },
+    {
+      id: "claude_cli",
+      label: "Claude CLI / Claude subscription",
+      kind: "subscription_cli",
+      state: "unknown",
+      command: "claude setup-token",
+      model: "claude-sonnet-4",
+      detail: "Provider detection has not run yet.",
+      guidance: "Refresh AI configuration to detect the local Claude subscription token.",
+    },
+    {
+      id: "compatible_endpoint",
+      label: "OpenAI-compatible / local endpoint",
+      kind: "endpoint",
+      state: "unknown",
+      command: "set OPENAI_BASE_URL",
+      model: "local-model",
+      detail: "Provider detection has not run yet.",
+      guidance: "Set a local/private endpoint after model-routing guardrails are enabled.",
+    },
+  ],
+};
+
 const defaultVaultTestForm = {
   credentialId: "",
   passphrase: "",
@@ -421,6 +495,7 @@ export function App() {
     if (typeof window === "undefined") return "zh-CN";
     return resolveLocale(readStoredLocale() || window.navigator?.language);
   });
+  const [theme, setTheme] = useState(() => readStoredTheme());
   const t = useMemo(() => makeTranslator(locale), [locale]);
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
@@ -475,6 +550,7 @@ export function App() {
   const [strategyProfile, setStrategyProfile] = useState(defaultStrategyProfile);
   const [strategyProfileStatus, setStrategyProfileStatus] = useState({ tone: "loading", message: "Loading" });
   const [isStrategyPanelOpen, setIsStrategyPanelOpen] = useState(false);
+  const [isAIConfigOpen, setIsAIConfigOpen] = useState(false);
   const [isSavingStrategyProfile, setIsSavingStrategyProfile] = useState(false);
   const [reconciliationStatus, setReconciliationStatus] = useState({ tone: "warn", message: "No checks" });
   const [reconcilingId, setReconcilingId] = useState(null);
@@ -495,6 +571,8 @@ export function App() {
   const [isRunningBacktest, setIsRunningBacktest] = useState(false);
   const [appInfo, setAppInfo] = useState(defaultAppInfo);
   const [preflight, setPreflight] = useState(defaultPreflight);
+  const [aiProviders, setAIProviders] = useState(defaultAIProviders);
+  const [aiProvidersStatus, setAIProvidersStatus] = useState({ tone: "warn", message: "Ready" });
 
   function notify(message, tone = "info") {
     if (toastTimerRef.current) {
@@ -521,6 +599,15 @@ export function App() {
       writeStoredLocale(locale);
     }
   }, [locale]);
+
+  useEffect(() => {
+    const resolvedTheme = resolveTheme(theme);
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.theme = resolvedTheme;
+      document.documentElement.style.colorScheme = resolvedTheme;
+    }
+    writeStoredTheme(resolvedTheme);
+  }, [theme]);
 
   useEffect(() => {
     let active = true;
@@ -554,7 +641,13 @@ export function App() {
     refreshLocalData();
     refreshAppInfo();
     refreshPreflight();
+    refreshAIProviders({ silent: true });
   }, []);
+
+  useEffect(() => {
+    if (!isAIConfigOpen) return;
+    refreshAIProviders({ silent: true });
+  }, [isAIConfigOpen]);
 
   useEffect(() => {
     if (workspaceTab === "Backtest" && !backtestResult && !isRunningBacktest) {
@@ -632,15 +725,90 @@ export function App() {
 
   function handleLocaleChange(nextLocale) {
     const resolved = resolveLocale(nextLocale);
+    const nextT = makeTranslator(resolved);
     setLocale(resolved);
-    notify(resolved === "zh-CN" ? t("toast.switchedChinese", "Switched to Chinese") : t("toast.switchedEnglish", "Switched to English"), "success");
+    notify(
+      resolved === "zh-CN"
+        ? nextT("toast.switchedChinese", "Switched to Chinese")
+        : nextT("toast.switchedEnglish", "Switched to English"),
+      "success",
+    );
+  }
+
+  function handleThemeToggle() {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    notify(
+      t("toast.themeChanged", "Theme switched to {value}", {
+        value: next === "light" ? t("top.themeLight", "Light") : t("top.themeDark", "Dark"),
+      }),
+      "success",
+    );
   }
 
   function notifyBlocked(message) {
     notify(message || t("toast.actionUnavailable", "Action is not ready yet"), "warn");
   }
 
+  function handleDataSourceChange(value) {
+    if (value === dataSource) {
+      notify(t("toast.exchangeAlreadyActive", "{value} is already active", { value }), "info");
+      return;
+    }
+    setDataSource(value);
+    notify(t("toast.exchangeChanged", "Exchange switched to {value}", { value }), "success");
+  }
+
+  function handleModeChange(nextMode) {
+    if (nextMode === mode) {
+      notify(t("toast.modeAlreadyActive", "{value} mode is already active", { value: choiceLabel(t, nextMode) }), "info");
+      if (nextMode === "Live") {
+        setIsLiveGuardOpen(true);
+      }
+      return;
+    }
+    setMode(nextMode);
+    notify(t("toast.modeChanged", "Mode switched to {value}", { value: choiceLabel(t, nextMode) }), nextMode === "Live" ? "warn" : "success");
+    if (nextMode === "Live") {
+      setIsLiveGuardOpen(true);
+      refreshLiveGuard();
+      refreshAuditLog();
+      refreshLiveExecutions();
+    }
+  }
+
+  function handleWorkspaceTabChange(tab) {
+    if (tab === workspaceTab) {
+      notify(t("toast.workspaceAlreadyOpen", "{value} is already open", { value: choiceLabel(t, tab) }), "info");
+      return;
+    }
+    setWorkspaceTab(tab);
+    notify(t("toast.workspaceChanged", "Opened {value}", { value: choiceLabel(t, tab) }), "success");
+  }
+
+  function handleBottomTabChange(tab) {
+    if (tab === bottomTab) {
+      notify(t("toast.panelAlreadyOpen", "{value} panel is already open", { value: choiceLabel(t, tab) }), "info");
+      return;
+    }
+    setBottomTab(tab);
+    notify(t("toast.panelChanged", "Opened {value} panel", { value: choiceLabel(t, tab) }), "info");
+  }
+
+  function handleEventFilterChange(filter) {
+    if (filter === eventFilter) {
+      notify(t("toast.filterAlreadyActive", "{value} filter is already active", { value: choiceLabel(t, filter) }), "info");
+      return;
+    }
+    setEventFilter(filter);
+    notify(t("toast.filterChanged", "Event filter: {value}", { value: choiceLabel(t, filter) }), "info");
+  }
+
   function handleTimeframeChange(nextTimeframe) {
+    if (nextTimeframe === timeframe) {
+      notify(t("toast.timeframeAlreadyActive", "{value} timeframe is already active", { value: nextTimeframe }), "info");
+      return;
+    }
     setTimeframe(nextTimeframe);
     notify(t("toast.timeframeChanged", "Timeframe switched to {value}", { value: nextTimeframe }), "success");
   }
@@ -654,6 +822,70 @@ export function App() {
     setIsRunStopped(false);
     setReplaySpeed(1);
     notify(t("toast.runRestarted", "Simulation controls reset"), "success");
+  }
+
+  function handlePauseToggle() {
+    setIsPaused((value) => {
+      const next = !value;
+      notify(next ? t("toast.runPaused", "Simulation paused") : t("toast.runResumed", "Simulation resumed"), next ? "warn" : "success");
+      return next;
+    });
+  }
+
+  function handleRunStopToggle() {
+    setIsRunStopped((value) => {
+      const next = !value;
+      notify(next ? t("toast.runStopped", "Run stopped") : t("toast.runResumed", "Simulation resumed"), next ? "warn" : "success");
+      return next;
+    });
+  }
+
+  function buildAIContextSnapshot() {
+    const verdict = labState.verdict || {};
+    const featureLines = (labState.features || [])
+      .map((feature) => `- ${feature.name}: ${feature.value > 0 ? "+" : ""}${feature.value.toFixed(2)} (${feature.impact})`)
+      .join("\n");
+    return [
+      "CCVar Quant Lab AI context",
+      `Time: ${new Date().toISOString()}`,
+      `Mode: ${mode}`,
+      `Exchange: ${strategyProfile.exchange || dataSource}`,
+      `Symbol: ${strategyProfile.symbol || labState.meta.selectedMarket || "BTCUSDT"}`,
+      `Strategy: ${strategyProfile.name || labState.meta.strategy}`,
+      `Intent: ${String(strategyProfile.side || "buy").toUpperCase()} ${formatMoney(Number(strategyProfile.orderSizeUsdt || 0))} USDT`,
+      `Risk guard: max order ${formatMoney(Number(riskProfile.maxOrderUsdt || 0))} USDT, min confidence ${Number(riskProfile.minConfidence || 0).toFixed(2)}`,
+      `Current signal: ${verdict.signal || "-"} / confidence ${verdict.confidence || "-"}% / regime ${verdict.regime || "-"}`,
+      `Reasoning: ${verdict.reasoning || "-"}`,
+      "Feature impacts:",
+      featureLines || "- no feature data",
+      "",
+      "Please produce a cautious trading analysis only. Do not assume production/mainnet execution is allowed. Respect the local risk guardrails and identify missing evidence before suggesting an action.",
+    ].join("\n");
+  }
+
+  async function handleCopyAIContext() {
+    const text = buildAIContextSnapshot();
+    try {
+      await navigator.clipboard.writeText(text);
+      notify(t("toast.aiContextCopied", "AI context copied"), "success");
+    } catch {
+      window.prompt(t("prompt.copyAIContext", "Copy this AI context"), text);
+      notify(t("toast.aiContextReady", "AI context is ready to copy"), "warn");
+    }
+  }
+
+  async function handleCopyAICommand(command) {
+    if (!command) {
+      notify(t("toast.actionUnavailable", "Action is not ready yet"), "warn");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(command);
+      notify(t("toast.commandCopied", "Command copied"), "success");
+    } catch {
+      window.prompt(t("prompt.copyCommand", "Copy this command"), command);
+      notify(t("toast.commandReady", "Command is ready to copy"), "warn");
+    }
   }
 
   function handleRunSelect(index) {
@@ -768,16 +1000,6 @@ export function App() {
       permissions: { ...defaultCredentialForm.permissions },
     }));
     setIsCredentialPanelOpen(true);
-  }
-
-  function handleModeChange(nextMode) {
-    setMode(nextMode);
-    if (nextMode === "Live") {
-      setIsLiveGuardOpen(true);
-      refreshLiveGuard();
-      refreshAuditLog();
-      refreshLiveExecutions();
-    }
   }
 
   async function handleCredentialSave(event) {
@@ -1024,6 +1246,26 @@ export function App() {
           summary: error.message || "unavailable",
         }],
       });
+    }
+  }
+
+  async function refreshAIProviders({ silent = false } = {}) {
+    if (!silent) {
+      setAIProvidersStatus({ tone: "loading", message: "Loading" });
+    }
+    try {
+      const payload = await loadAIProviders();
+      setAIProviders(payload || defaultAIProviders);
+      setAIProvidersStatus({ tone: "success", message: "Loaded" });
+      if (!silent) {
+        notify(t("toast.aiProvidersRefreshed", "AI providers refreshed"), "success");
+      }
+    } catch (error) {
+      setAIProviders(defaultAIProviders);
+      setAIProvidersStatus({ tone: "danger", message: error.message || "Unavailable" });
+      if (!silent) {
+        notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message || "Unavailable" }), "danger");
+      }
     }
   }
 
@@ -1503,8 +1745,6 @@ export function App() {
   const activeRun = labState.runs[selectedRun] ?? labState.runs[0];
   const modeTone = mode === "Live" ? "danger" : mode === "Paper" ? "paper" : "shadow";
 
-  const isModalOpen = isCredentialPanelOpen || isStrategyPanelOpen || isLiveGuardOpen;
-
   return (
     <>
       <main className={classNames("app-shell", (isStopped || isRunStopped) && "is-stopped")}>
@@ -1515,7 +1755,7 @@ export function App() {
           modeTone={modeTone}
           setMode={handleModeChange}
           dataSource={dataSource}
-          setDataSource={setDataSource}
+          setDataSource={handleDataSourceChange}
           isStopped={isStopped}
           onToggleKillSwitch={handleKillSwitchToggle}
           sourceStatus={sourceStatus}
@@ -1523,6 +1763,7 @@ export function App() {
           onOpenCredentials={openCredentialPanel}
           strategyName={strategyProfile.name}
           onOpenStrategy={() => setIsStrategyPanelOpen(true)}
+          onOpenAIConfig={() => setIsAIConfigOpen(true)}
           liveGuard={liveGuard}
           killSwitch={killSwitch}
           onOpenLiveGuard={() => setIsLiveGuardOpen(true)}
@@ -1530,7 +1771,14 @@ export function App() {
 
         <section className="lab-grid">
         <aside className="left-rail">
-          <BrandBlock appInfo={appInfo} />
+          <BrandBlock
+            appInfo={appInfo}
+            t={t}
+            locale={locale}
+            theme={theme}
+            onLocaleChange={handleLocaleChange}
+            onThemeToggle={handleThemeToggle}
+          />
           <ExperimentRuns
             t={t}
             runs={labState.runs}
@@ -1548,18 +1796,15 @@ export function App() {
             t={t}
             meta={labState.meta}
             dataSource={dataSource}
-            setDataSource={(value) => {
-              setDataSource(value);
-              notify(t("toast.exchangeChanged", "Exchange switched to {value}", { value }), "success");
-            }}
+            setDataSource={handleDataSourceChange}
             timeframe={timeframe}
             onTimeframeChange={handleTimeframeChange}
             isPaused={isPaused}
             isStopped={isStopped || isRunStopped}
             stopLocked={isStopped}
             replaySpeed={replaySpeed}
-            setIsPaused={setIsPaused}
-            setIsStopped={setIsRunStopped}
+            onTogglePause={handlePauseToggle}
+            onToggleRunStopped={handleRunStopToggle}
             setReplaySpeed={setReplaySpeed}
             onSimStep={handleSimStep}
             onRestart={handleRestartRun}
@@ -1580,7 +1825,7 @@ export function App() {
         </aside>
 
         <section className="workspace">
-          <WorkspaceTabs t={t} active={workspaceTab} setActive={setWorkspaceTab} />
+          <WorkspaceTabs t={t} active={workspaceTab} onChange={handleWorkspaceTabChange} />
           <ChartWorkspace
             t={t}
             meta={labState.meta}
@@ -1596,13 +1841,14 @@ export function App() {
             isRunningBacktest={isRunningBacktest}
             onRunBacktest={handleRunBacktest}
             timeframe={timeframe}
+            theme={theme}
             onTimeframeChange={handleTimeframeChange}
             onOpenStrategy={() => setIsStrategyPanelOpen(true)}
             onActionNotice={handleFeatureNotice}
           />
           <BottomPanel
             active={bottomTab}
-            setActive={setBottomTab}
+            setActive={handleBottomTabChange}
             performance={labState.performance}
             positions={labState.positions}
             orders={labState.orders}
@@ -1615,7 +1861,7 @@ export function App() {
             onPaperReset={handlePaperReset}
             events={visibleEvents}
             eventFilter={eventFilter}
-            setEventFilter={setEventFilter}
+            setEventFilter={handleEventFilterChange}
             onNotify={notify}
             meta={labState.meta}
             t={t}
@@ -1623,7 +1869,7 @@ export function App() {
         </section>
 
         <aside className="right-rail">
-          <VerdictPanel t={t} verdict={labState.verdict} features={labState.features} mode={mode} />
+          <VerdictPanel t={t} verdict={labState.verdict} features={labState.features} mode={mode} onOpenAIConfig={() => setIsAIConfigOpen(true)} />
         </aside>
       </section>
       <CredentialPanel
@@ -1653,6 +1899,20 @@ export function App() {
         setField={setStrategyProfileField}
         onSave={handleSaveStrategyProfile}
         isSaving={isSavingStrategyProfile}
+      />
+      <AIConfigPanel
+        t={t}
+        open={isAIConfigOpen}
+        onClose={() => setIsAIConfigOpen(false)}
+        meta={labState.meta}
+        verdict={labState.verdict}
+        strategyProfile={strategyProfile}
+        riskProfile={riskProfile}
+        providers={aiProviders}
+        providerStatus={aiProvidersStatus}
+        onRefreshProviders={() => refreshAIProviders()}
+        onCopyContext={handleCopyAIContext}
+        onCopyCommand={handleCopyAICommand}
       />
       <LiveGuardPanel
         t={t}
@@ -1715,7 +1975,6 @@ export function App() {
       />
         <ToastMessage toast={toast} onClose={() => setToast(null)} />
       </main>
-      {isModalOpen ? null : <LanguageSwitcher t={t} locale={locale} onChange={handleLocaleChange} />}
     </>
   );
 }
@@ -1733,19 +1992,76 @@ function ToastMessage({ toast, onClose }) {
 }
 
 function LanguageSwitcher({ t, locale, onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const switcherRef = useRef(null);
+  const languageOptions = [
+    { value: "zh-CN", label: t("top.languageChinese", "中文") },
+    { value: "en-US", label: "English" },
+  ];
+  const currentLanguage = languageOptions.find((item) => item.value === locale) || languageOptions[0];
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    function handlePointerDown(event) {
+      if (!switcherRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  function selectLanguage(value) {
+    setIsOpen(false);
+    if (value !== locale) {
+      onChange(resolveLocale(value));
+    }
+  }
+
   return (
-    <aside className="global-language-switcher" aria-label={t("top.languageSwitch", "Language switch")}>
-      <span>
+    <div className="brand-language-switcher" ref={switcherRef}>
+      <button
+        className={classNames("language-trigger", isOpen && "active")}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-label={t("top.languageSwitch", "Language switch")}
+        onClick={() => setIsOpen((value) => !value)}
+      >
         <Languages size={14} />
-        {t("top.languageSwitch", "Language")}
-      </span>
-      <Segmented
-        value={locale}
-        values={["zh-CN", "en-US"]}
-        onChange={(value) => onChange(resolveLocale(value))}
-        labelFor={(item) => (item === "zh-CN" ? t("top.languageChinese", "中文") : "English")}
-      />
-    </aside>
+        <span>{currentLanguage.label}</span>
+        <ChevronDown size={13} />
+      </button>
+      {isOpen ? (
+        <div className="language-menu" role="listbox" aria-label={t("top.languageSwitch", "Language switch")}>
+          {languageOptions.map((item) => (
+            <button
+              className={classNames(item.value === locale && "active")}
+              type="button"
+              role="option"
+              aria-selected={item.value === locale}
+              key={item.value}
+              onClick={() => selectLanguage(item.value)}
+            >
+              <span>{item.label}</span>
+              {item.value === locale ? <Check size={13} /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1786,7 +2102,7 @@ function CredentialPanel({
   const testEnvironment = selectedTestCredential?.exchange === "OKX" ? "demo" : testForm.environment;
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="credential-modal" role="dialog" aria-modal="true" aria-labelledby="credential-title">
         <header className="credential-modal-header">
           <div>
@@ -2028,7 +2344,7 @@ function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, is
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="credential-modal strategy-modal" role="dialog" aria-modal="true" aria-labelledby="strategy-title">
         <header className="credential-modal-header">
           <div>
@@ -2125,6 +2441,126 @@ function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, is
             <SlidersHorizontal size={14} />
             {isSaving ? t("strategy.saving", "SAVING") : t("strategy.save", "SAVE STRATEGY")}
           </button>
+        </section>
+      </section>
+    </div>
+  );
+}
+
+function providerStateTone(state) {
+  if (state === "ok") return "success";
+  if (state === "noauth") return "warn";
+  if (state === "missing") return "danger";
+  return "neutral";
+}
+
+function AIConfigPanel({
+  t,
+  open,
+  onClose,
+  meta,
+  verdict,
+  strategyProfile,
+  riskProfile,
+  providers,
+  providerStatus,
+  onRefreshProviders,
+  onCopyContext,
+  onCopyCommand,
+}) {
+  useEscapeToClose(open, onClose);
+  if (!open) return null;
+
+  const providerCards = (providers?.providers?.length ? providers.providers : defaultAIProviders.providers)
+    .map((provider) => ({
+      ...provider,
+      title: t(`aiConfig.providerTitles.${provider.id}`, provider.label),
+      body: t(`aiConfig.providerBodies.${provider.id}`, provider.detail),
+      guidance: t(`aiConfig.providerGuidance.${provider.id}`, provider.guidance || ""),
+      stateLabel: t(`aiConfig.providerStates.${provider.state}`, provider.state || "-"),
+      tone: providerStateTone(provider.state),
+    }));
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section
+        className="credential-modal ai-config-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-config-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="credential-modal-header">
+          <div>
+            <h2 id="ai-config-title">{t("aiConfig.title", "AI Configuration")}</h2>
+            <span><Brain size={13} /> {t("aiConfig.subtitle", "Model routing, subscriptions, and safety boundary")}</span>
+          </div>
+          <div className="modal-header-actions">
+            <button className="header-ghost-button" type="button" onClick={onRefreshProviders} disabled={providerStatus?.tone === "loading"}>
+              <RefreshCw size={13} />
+              {providerStatus?.tone === "loading" ? t("common.loading", "Loading") : t("aiConfig.refreshProviders", "Refresh")}
+            </button>
+            <button className="icon-close" type="button" onClick={onClose} aria-label={t("aiConfig.close", "Close AI configuration")}>
+              <X size={16} />
+            </button>
+          </div>
+        </header>
+
+        <section className="ai-config-body">
+          <div className="ai-active-card">
+            <div>
+              <span>{t("aiConfig.activeRoute", "Active Route")}</span>
+              <strong>{meta?.model || "Local AI Policy v0.2.0"}</strong>
+              <small>{t("aiConfig.localActiveBody", "The first release executes deterministic local policy decisions by default. No external model call is required for Shadow/Paper/guarded Live validation.")}</small>
+            </div>
+            <code>{t("aiConfig.active", "ACTIVE")}</code>
+          </div>
+
+          <div className="ai-config-summary">
+            <span>{t("aiConfig.strategy", "Strategy")}</span>
+            <strong>{strategyProfile?.name || meta?.strategy || "-"}</strong>
+            <span>{t("common.intent", "Intent")}</span>
+            <strong>{String(strategyProfile?.side || "buy").toUpperCase()} {formatMoney(Number(strategyProfile?.orderSizeUsdt || 0))} USDT</strong>
+            <span>{t("common.risk", "Risk")}</span>
+            <strong>{formatMoney(Number(riskProfile?.maxOrderUsdt || 0))} USDT / {Number(riskProfile?.minConfidence || 0).toFixed(2)}</strong>
+            <span>{t("panels.currentSignal", "Current Signal")}</span>
+            <strong>{verdict?.signal || "-"} / {verdict?.confidence || "-"}%</strong>
+          </div>
+
+          <div className="ai-provider-grid">
+            {providerCards.map((card) => (
+              <article className={classNames("ai-provider-card", `state-${card.tone}`)} key={card.id}>
+                <div>
+                  <strong>{card.title}</strong>
+                  <span>{card.stateLabel}</span>
+                </div>
+                <p>{card.body}</p>
+                {card.guidance ? <small>{card.guidance}</small> : null}
+                <footer>
+                  <span>{card.source || card.kind || "-"}</span>
+                  <code>{card.model || "-"}</code>
+                </footer>
+                {card.command && card.command !== "configure in AI Vault" && card.state !== "ok" ? (
+                  <button className="provider-command-button" type="button" onClick={() => onCopyCommand(card.command)}>
+                    <Copy size={13} />
+                    {t("aiConfig.copyCommand", "Copy command")}
+                  </button>
+                ) : null}
+              </article>
+            ))}
+          </div>
+
+          <div className="subscription-assist-card">
+            <div>
+              <strong>{t("aiConfig.subscriptionAssist", "Subscription Assisted Mode")}</strong>
+              <span>{t("aiConfig.subscriptionAssistStatus", "Manual review")}</span>
+            </div>
+            <p>{t("aiConfig.subscriptionAssistBody", "For Codex, ChatGPT, Claude, or Claude Code subscriptions, copy a sanitized market/strategy/risk context and paste it into your subscribed tool. The app will not read browser cookies, local login sessions, or CLI OAuth tokens.")}</p>
+            <button className="save-credential" type="button" onClick={onCopyContext}>
+              <Download size={14} />
+              {t("aiConfig.copyContext", "COPY AI CONTEXT")}
+            </button>
+          </div>
         </section>
       </section>
     </div>
@@ -2330,7 +2766,7 @@ function LiveGuardPanel({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="credential-modal live-guard-modal" role="dialog" aria-modal="true" aria-labelledby="live-guard-title">
         <header className="credential-modal-header">
           <div>
@@ -2835,17 +3271,41 @@ function LiveGuardPanel({
   );
 }
 
-function BrandBlock({ appInfo }) {
+function BrandBlock({ appInfo, t, locale, theme, onLocaleChange, onThemeToggle }) {
   return (
     <header className="brand-block">
       <div className="brand-icon">
-        <Brain size={22} />
+        <img src="/favicon.svg" alt="" aria-hidden="true" />
       </div>
-      <div>
-        <h1>CCVar Quant Lab</h1>
-        <span>v{appInfo?.version || "0.1.0"}</span>
+      <div className="brand-copy">
+        <div>
+          <h1>CCVar Quant Lab</h1>
+          <div className="brand-meta-row">
+            <span>v{appInfo?.version || "0.1.0"}</span>
+            <ThemeToggle t={t} theme={theme} onToggle={onThemeToggle} />
+            <LanguageSwitcher t={t} locale={locale} onChange={onLocaleChange} />
+          </div>
+        </div>
       </div>
     </header>
+  );
+}
+
+function ThemeToggle({ t, theme, onToggle }) {
+  const isLight = theme === "light";
+  const label = isLight ? t("top.themeLight", "Light") : t("top.themeDark", "Dark");
+  return (
+    <button
+      className="theme-trigger"
+      type="button"
+      aria-label={t("top.themeSwitch", "Theme switch")}
+      aria-pressed={isLight}
+      onClick={onToggle}
+      title={t("top.themeSwitch", "Theme switch")}
+    >
+      {isLight ? <Sun size={14} /> : <Moon size={14} />}
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -2864,6 +3324,7 @@ function TopBar({
   onOpenCredentials,
   strategyName,
   onOpenStrategy,
+  onOpenAIConfig,
   liveGuard,
   killSwitch,
   onOpenLiveGuard,
@@ -2908,10 +3369,10 @@ function TopBar({
 
       <div className="top-section model-section">
         <span className="label">{t("top.model", "Model")}</span>
-        <div className="model-pill">
+        <button className="model-pill model-config-button" type="button" onClick={onOpenAIConfig} title={t("aiConfig.title", "AI Configuration")}>
           <span>{meta.model}</span>
           <i />
-        </div>
+        </button>
       </div>
 
       <MetricTile label={t("top.simCapital", "Sim Capital")} value={`${formatMoney(meta.simCapital)} USDT`} />
@@ -3038,8 +3499,8 @@ function SimulationControls({
   isStopped,
   stopLocked = false,
   replaySpeed,
-  setIsPaused,
-  setIsStopped,
+  onTogglePause,
+  onToggleRunStopped,
   setReplaySpeed,
   onSimStep,
   onRestart,
@@ -3108,7 +3569,7 @@ function SimulationControls({
         </label>
       </div>
       <div className="control-actions">
-        <button className="pause-btn" type="button" onClick={() => setIsPaused((value) => !value)}>
+        <button className="pause-btn" type="button" onClick={onTogglePause}>
           {isPaused ? <Play size={15} /> : <Pause size={15} />}
           {isPaused ? t("panels.resume", "RESUME") : t("panels.pause", "PAUSE")}
         </button>
@@ -3120,7 +3581,7 @@ function SimulationControls({
               onActionNotice(t("panels.killActive", "KILL ACTIVE"), t("toast.killSwitchControlsLocked", "Resume the Kill Switch before changing the run state"));
               return;
             }
-            setIsStopped((value) => !value);
+            onToggleRunStopped();
           }}
           title={stopLocked ? t("toast.killSwitchControlsLocked", "Resume the Kill Switch before changing the run state") : ""}
         >
@@ -3213,11 +3674,11 @@ function SimulationControls({
   );
 }
 
-function WorkspaceTabs({ t, active, setActive }) {
+function WorkspaceTabs({ t, active, onChange }) {
   return (
     <nav className="workspace-tabs">
       {["Real-time Sim", "Backtest", "Shadow Trade"].map((tab) => (
-        <button key={tab} type="button" className={active === tab ? "active" : ""} onClick={() => setActive(tab)}>
+        <button key={tab} type="button" className={active === tab ? "active" : ""} onClick={() => onChange(tab)}>
           {choiceLabel(t, tab)}
         </button>
       ))}
@@ -3240,6 +3701,7 @@ function ChartWorkspace({
   isRunningBacktest,
   onRunBacktest,
   timeframe,
+  theme,
   onTimeframeChange,
   onOpenStrategy,
   onActionNotice,
@@ -3310,8 +3772,8 @@ function ChartWorkspace({
         <span>{t("panels.lastUpdate", "Last Update")}: {meta.lastUpdated}</span>
       </div>
       <div className="chart-stack">
-        <EquityChart equity={equity} benchmark={benchmark} />
-        <MarketChart candles={candles} />
+        <EquityChart equity={equity} benchmark={benchmark} theme={theme} />
+        <MarketChart candles={candles} theme={theme} />
       </div>
       <div className="market-footer">
         <span>{meta.selectedMarket} - {timeframe} - {meta.dataSource}</span>
@@ -3487,23 +3949,24 @@ function formatBacktestTime(value) {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function EquityChart({ equity, benchmark }) {
+function EquityChart({ equity, benchmark, theme }) {
   const ref = useRef(null);
 
   useEffect(() => {
     if (!ref.current) return undefined;
-    const chart = createChart(ref.current, chartOptions({ height: 158 }));
+    const chart = createChart(ref.current, chartOptions({ height: 158, theme }));
+    const palette = chartPalette(theme);
     const equitySeries = chart.addSeries(AreaSeries, {
-      topColor: "rgba(30, 202, 185, 0.24)",
-      bottomColor: "rgba(30, 202, 185, 0.02)",
-      lineColor: "#23d4c6",
+      topColor: palette.equityTop,
+      bottomColor: palette.equityBottom,
+      lineColor: palette.teal,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: true,
     });
     equitySeries.setData(equity);
     const benchmarkSeries = chart.addSeries(LineSeries, {
-      color: "rgba(184, 195, 203, 0.62)",
+      color: palette.benchmark,
       lineWidth: 2,
       priceLineVisible: false,
     });
@@ -3516,45 +3979,46 @@ function EquityChart({ equity, benchmark }) {
       window.removeEventListener("resize", resize);
       chart.remove();
     };
-  }, [benchmark, equity]);
+  }, [benchmark, equity, theme]);
 
   return <div className="equity-chart" ref={ref} />;
 }
 
-function MarketChart({ candles }) {
+function MarketChart({ candles, theme }) {
   const ref = useRef(null);
 
   useEffect(() => {
     if (!ref.current) return undefined;
-    const chart = createChart(ref.current, chartOptions({ height: 355 }));
+    const chart = createChart(ref.current, chartOptions({ height: 355, theme }));
+    const palette = chartPalette(theme);
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#30d889",
-      downColor: "#ef5b57",
+      upColor: palette.green,
+      downColor: palette.red,
       borderVisible: false,
-      wickUpColor: "#30d889",
-      wickDownColor: "#ef5b57",
-      priceLineColor: "#23d4c6",
+      wickUpColor: palette.green,
+      wickDownColor: palette.red,
+      priceLineColor: palette.teal,
     });
     candleSeries.setData(candles);
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
       priceScaleId: "",
-      color: "rgba(82, 203, 154, 0.35)",
+      color: palette.volumeGreen,
     });
     volumeSeries.setData(candles.map((candle) => ({
       time: candle.time,
       value: candle.volume,
-      color: candle.close >= candle.open ? "rgba(48, 216, 137, 0.36)" : "rgba(239, 91, 87, 0.34)",
+      color: candle.close >= candle.open ? palette.volumeGreen : palette.volumeRed,
     })));
     chart.priceScale("").applyOptions({
       scaleMargins: { top: 0.78, bottom: 0 },
     });
     createSeriesMarkers(candleSeries, [
-      { time: candles[18].time, position: "belowBar", color: "#23d4c6", shape: "arrowUp", text: "BUY" },
-      { time: candles[34].time, position: "aboveBar", color: "#ef5b57", shape: "arrowDown", text: "SELL" },
-      { time: candles[54].time, position: "belowBar", color: "#23d4c6", shape: "arrowUp", text: "BUY" },
-      { time: candles[72].time, position: "aboveBar", color: "#ef5b57", shape: "arrowDown", text: "SELL" },
-      { time: candles[90].time, position: "belowBar", color: "#23d4c6", shape: "arrowUp", text: "BUY" },
+      { time: candles[18].time, position: "belowBar", color: palette.teal, shape: "arrowUp", text: "BUY" },
+      { time: candles[34].time, position: "aboveBar", color: palette.red, shape: "arrowDown", text: "SELL" },
+      { time: candles[54].time, position: "belowBar", color: palette.teal, shape: "arrowUp", text: "BUY" },
+      { time: candles[72].time, position: "aboveBar", color: palette.red, shape: "arrowDown", text: "SELL" },
+      { time: candles[90].time, position: "belowBar", color: palette.teal, shape: "arrowUp", text: "BUY" },
     ]);
     chart.timeScale().fitContent();
     const resize = () => chart.applyOptions({ width: ref.current.clientWidth });
@@ -3564,45 +4028,81 @@ function MarketChart({ candles }) {
       window.removeEventListener("resize", resize);
       chart.remove();
     };
-  }, [candles]);
+  }, [candles, theme]);
 
   return <div className="market-chart" ref={ref} />;
 }
 
-function chartOptions({ height }) {
+function chartPalette(theme) {
+  if (theme === "light") {
+    return {
+      text: "rgba(39, 57, 66, 0.72)",
+      grid: "rgba(79, 107, 119, 0.14)",
+      border: "rgba(79, 107, 119, 0.24)",
+      teal: "#089f95",
+      green: "#0aa66d",
+      red: "#dd3f3b",
+      benchmark: "rgba(78, 98, 108, 0.58)",
+      equityTop: "rgba(8, 159, 149, 0.2)",
+      equityBottom: "rgba(8, 159, 149, 0.02)",
+      volumeGreen: "rgba(10, 166, 109, 0.28)",
+      volumeRed: "rgba(221, 63, 59, 0.26)",
+      crosshair: "rgba(8, 159, 149, 0.5)",
+    };
+  }
+  return {
+    text: "rgba(212, 225, 232, 0.72)",
+    grid: "rgba(114, 145, 160, 0.11)",
+    border: "rgba(105, 137, 151, 0.22)",
+    teal: "#23d4c6",
+    green: "#30d889",
+    red: "#ef5b57",
+    benchmark: "rgba(184, 195, 203, 0.62)",
+    equityTop: "rgba(30, 202, 185, 0.24)",
+    equityBottom: "rgba(30, 202, 185, 0.02)",
+    volumeGreen: "rgba(82, 203, 154, 0.35)",
+    volumeRed: "rgba(239, 91, 87, 0.34)",
+    crosshair: "rgba(35, 212, 198, 0.45)",
+  };
+}
+
+function chartOptions({ height, theme }) {
+  const palette = chartPalette(theme);
   return {
     height,
     layout: {
       background: { color: "transparent" },
-      textColor: "rgba(212, 225, 232, 0.72)",
+      textColor: palette.text,
       fontFamily: "IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 11,
     },
     grid: {
-      vertLines: { color: "rgba(114, 145, 160, 0.11)" },
-      horzLines: { color: "rgba(114, 145, 160, 0.11)" },
+      vertLines: { color: palette.grid },
+      horzLines: { color: palette.grid },
     },
     rightPriceScale: {
-      borderColor: "rgba(105, 137, 151, 0.22)",
+      borderColor: palette.border,
     },
     timeScale: {
-      borderColor: "rgba(105, 137, 151, 0.22)",
+      borderColor: palette.border,
       timeVisible: true,
       secondsVisible: false,
     },
     crosshair: {
-      vertLine: { color: "rgba(35, 212, 198, 0.45)" },
-      horzLine: { color: "rgba(35, 212, 198, 0.45)" },
+      vertLine: { color: palette.crosshair },
+      horzLine: { color: palette.crosshair },
     },
   };
 }
 
-function VerdictPanel({ t, verdict, features, mode }) {
+function VerdictPanel({ t, verdict, features, mode, onOpenAIConfig }) {
   return (
     <section className="panel verdict-panel">
       <div className="panel-header">
         <h2>{t("panels.aiModelVerdict", "AI Model Verdict")}</h2>
-        <span className="model-dot">{t("panels.modelOnline", "Model online")}</span>
+        <button className="model-dot model-config-link" type="button" onClick={onOpenAIConfig}>
+          {t("panels.modelOnline", "Model online")}
+        </button>
       </div>
       <div className="signal-block">
         <span>{t("panels.currentSignal", "Current Signal")}</span>

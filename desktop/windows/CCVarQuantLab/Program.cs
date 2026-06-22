@@ -23,6 +23,11 @@ internal sealed class QuantLabForm : Form
     public QuantLabForm()
     {
         Text = AppName;
+        var appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        if (appIcon is not null)
+        {
+            Icon = appIcon;
+        }
         Width = 1440;
         Height = 960;
         MinimumSize = new Size(1080, 720);
