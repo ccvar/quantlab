@@ -3843,7 +3843,6 @@ input[type="range"] {
   }
 
   .model-section,
-  .language-section,
   .connection {
     grid-column: span 2;
   }
@@ -3994,7 +3993,6 @@ input[type="range"] {
   }
 
   .model-section,
-  .language-section,
   .connection {
     grid-column: 1 / -1;
   }
@@ -4230,7 +4228,6 @@ input[type="range"] {
   .mode-section,
   .strategy-section,
   .model-section,
-  .language-section,
   .connection {
     grid-column: 1;
   }

@@ -13,7 +13,8 @@ CCVar Quant Lab is built around a safe progression: AI simulation, shadow/paper 
 - Native Windows desktop package with two launchers: `CCVar Quant Lab.exe` as the standalone WebView2 client, and `Start CCVar Quant Lab Web.cmd` as the browser launcher.
 - Portable browser-launcher desktop packages under `dist/desktop/` for deterministic release verification.
 - SQLite local storage, encrypted credential Vault, hash-chained audit log, paper ledger, backtest history, account snapshots, and guarded execution ledger.
-- Bilingual UI with Simplified Chinese and English language switching.
+- Bilingual UI with Simplified Chinese/English switching plus persisted light/dark theme controls.
+- AI configuration panel that detects local Codex/ChatGPT subscription CLI, Claude subscription CLI, API-key environment readiness, and OpenAI-compatible local endpoints without exposing token values.
 - Final audit scripts that block completion until both Binance and OKX real sandbox acceptance reports pass.
 
 ## Downloads
@@ -45,11 +46,24 @@ The UI language files live under `src/i18n/`, one module per locale:
 - `src/i18n/en-US.js`
 - `src/i18n/index.js`
 
-The language switcher is the floating `Language / 语言` control in the lower-right corner and persists the selected locale in `localStorage` as `ccvar.locale`. The same embedded UI is used by the Web server, macOS native app, Windows native app, and browser launchers, so all delivery targets share the same i18n resources.
+The language switcher sits in the brand header next to the app version and persists the selected locale in `localStorage` as `ccvar.locale`. The light/dark theme toggle sits beside it and persists `ccvar.theme`. The same embedded UI is used by the Web server, macOS native app, Windows native app, and browser launchers, so all delivery targets share the same i18n and theme resources.
 
 When adding new UI copy, add the key to both locale files and call the translator through `t("path.to.key", "English fallback")`. Keep protocol values, exchange names, symbols, environment names, and audit/model output as raw data unless they are purely UI chrome.
 
 中文维护说明：所有页面文案都放在 `src/i18n/`，每个语种一个文件。新增页面或交互状态时，请同时补齐 `zh-CN.js` 和 `en-US.js`，不要把新的固定文案直接写死在组件里。
+
+## AI Provider Configuration
+
+Open AI configuration from the top `Model` pill or the model status action in the right rail. The panel shows:
+
+- `Local AI Policy`: the default auditable route for simulation, paper/shadow, and guarded live validation.
+- `Codex CLI / ChatGPT subscription`: detects a local `codex` binary plus `codex login status`; if login is missing, copy `codex login` from the panel and refresh.
+- `Claude CLI / Claude subscription`: detects local Claude CLI/auth material such as `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, or Claude config files; token values are never rendered.
+- `OpenAI API Key`, `Anthropic API Key`, and compatible local endpoints: readiness checks for future encrypted model routing.
+
+Subscription accounts are treated as assisted-analysis routes in this release. They do not grant unattended model execution and cannot bypass Live Guard, Risk Profile, Kill Switch, Vault checks, or audit logging.
+
+中文说明：AI 配置入口在顶部 `模型` 控件和右侧“模型在线/模型状态”位置。第一期默认仍走本地可审计策略；Codex/Claude 订阅账号只用于辅助分析检测与上下文复制，不会读取浏览器 Cookie，也不会把 token 值展示到界面或日志。
 
 ## Run
 

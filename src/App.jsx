@@ -2454,6 +2454,12 @@ function providerStateTone(state) {
   return "neutral";
 }
 
+function providerGuidanceText(t, provider) {
+  const stateGuidance = t(`aiConfig.providerGuidance.${provider.id}.${provider.state}`, "");
+  if (stateGuidance) return stateGuidance;
+  return t(`aiConfig.providerGuidance.${provider.id}.default`, provider.guidance || "");
+}
+
 function AIConfigPanel({
   t,
   open,
@@ -2476,7 +2482,7 @@ function AIConfigPanel({
       ...provider,
       title: t(`aiConfig.providerTitles.${provider.id}`, provider.label),
       body: t(`aiConfig.providerBodies.${provider.id}`, provider.detail),
-      guidance: t(`aiConfig.providerGuidance.${provider.id}`, provider.guidance || ""),
+      guidance: providerGuidanceText(t, provider),
       stateLabel: t(`aiConfig.providerStates.${provider.state}`, provider.state || "-"),
       tone: providerStateTone(provider.state),
     }));
