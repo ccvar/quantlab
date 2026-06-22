@@ -1,0 +1,99 @@
+name: Build Clients
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-clients-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test and Build Web UI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build embedded Web UI
+        run: npm run build
+
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Build local Web client binary
+        run: go build -trimpath -buildvcs=false -o bin/ccvar-quant ./cmd/ccvar-quant
+
+      - name: Upload embedded Web UI
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccvar-web-embedded-ui
+          path: cmd/ccvar-quant/web
+          if-no-files-found: error
+          retention-days: 14
+
+  package-desktop:
+    name: Package macOS and Windows Clients
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install release tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file ripgrep unzip zip
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Verify release packages
+        run: npm run verify:release
+
+      - name: Upload desktop release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccvar-desktop-release
+          path: |
+            dist/desktop/ccvar-quant-lab-macos-arm64.zip
+            dist/desktop/ccvar-quant-lab-windows-amd64.zip
+            dist/desktop/SHA256SUMS.txt
+            dist/desktop/release-manifest.json
+          if-no-files-found: error
+          retention-days: 14
