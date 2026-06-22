@@ -12,13 +12,19 @@
    - `OKX_DEMO_API_SECRET`
    - `OKX_DEMO_API_PASSPHRASE`
 3. 打开 `Actions -> Real Sandbox Acceptance`。
-4. 点击 `Run workflow`，选择 `main` 分支运行。
+4. 点击 `Run workflow`，选择 `main` 分支运行。可配置项包括：
+   - `symbol`：默认 `BTCUSDT`
+   - `size_usdt`：默认 `10`
+   - `validation_only`：默认 `true`
+   - `allow_demo_submit`：默认 `false`
 5. 成功后下载 `real-sandbox-final-audit` artifact，确认其中包含：
    - `final-audit-latest.json`
    - `live-acceptance-binance.json`
    - `live-acceptance-okx.json`
 
 该 workflow 会启动本地客户端，运行 `audit:final`，再执行 `audit:complete`。报告只包含验收状态、交易所环境、ledger/audit hash 和脱敏元数据；不会保存 API key、secret、OKX passphrase、Vault passphrase、ciphertext、salt 或 nonce。
+
+API key 的值通过 GitHub Secrets 配置，不通过 `Run workflow` 输入框填写。GitHub workflow 输入用于非敏感验收参数，Secrets 用于敏感凭据；这样可以避免 key 出现在运行参数、浏览器历史或日志里。
 
 ## 本地路径
 
@@ -36,6 +42,8 @@ set +a
 npm run audit:final
 npm run audit:complete
 ```
+
+`.env.acceptance.local` 可以配置 `CCVAR_ACCEPTANCE_SYMBOL`、`CCVAR_ACCEPTANCE_SIZE_USDT`、`CCVAR_ACCEPTANCE_VALIDATION_ONLY` 和 `CCVAR_ACCEPTANCE_ALLOW_DEMO_SUBMIT`。保持 `CCVAR_ACCEPTANCE_VALIDATION_ONLY=true` 是推荐默认值。
 
 `.gitignore` 默认忽略 `.env*`，只允许提交 `.env.acceptance.example`。如果本地验收失败，先运行：
 

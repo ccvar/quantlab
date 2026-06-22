@@ -2,6 +2,27 @@ name: Real Sandbox Acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      symbol:
+        description: "Spot symbol for Binance/OKX sandbox validation"
+        required: true
+        type: string
+        default: "BTCUSDT"
+      size_usdt:
+        description: "Notional size in USDT used by the validation intent"
+        required: true
+        type: string
+        default: "10"
+      validation_only:
+        description: "Use validation-only execution instead of submitting testnet/demo orders"
+        required: true
+        type: boolean
+        default: true
+      allow_demo_submit:
+        description: "Allow OKX demo submit when validation_only is false"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -15,6 +36,11 @@ jobs:
     name: Binance and OKX Real Sandbox Acceptance
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CCVAR_ACCEPTANCE_SYMBOL: ${{ inputs.symbol }}
+      CCVAR_ACCEPTANCE_SIZE_USDT: ${{ inputs.size_usdt }}
+      CCVAR_ACCEPTANCE_VALIDATION_ONLY: ${{ inputs.validation_only }}
+      CCVAR_ACCEPTANCE_ALLOW_DEMO_SUBMIT: ${{ inputs.allow_demo_submit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,6 +64,13 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Show non-secret acceptance config
+        run: |
+          echo "symbol=${CCVAR_ACCEPTANCE_SYMBOL}"
+          echo "size_usdt=${CCVAR_ACCEPTANCE_SIZE_USDT}"
+          echo "validation_only=${CCVAR_ACCEPTANCE_VALIDATION_ONLY}"
+          echo "allow_demo_submit=${CCVAR_ACCEPTANCE_ALLOW_DEMO_SUBMIT}"
 
       - name: Build local Web client
         run: |
