@@ -189,6 +189,8 @@ CI 产物包含：
 
 然后在 GitHub Actions 手动运行 `Real Sandbox Acceptance`。它会启动本地客户端到 `127.0.0.1:8787`，用两家真实沙盒 key 运行 `audit:final`，再执行 `npm run audit:complete`，并上传脱敏后的 final audit 和 live acceptance 报告。workflow 不会打印或上传 API key、secret、OKX passphrase、Vault passphrase、ciphertext、salt 或 nonce。
 
+更完整的逐步清单见 `docs/real-sandbox-acceptance.zh-CN.md`。本地验收可以复制 `.env.acceptance.example` 为 `.env.acceptance.local`，填入沙盒 key 后 source 该文件；`.gitignore` 会默认忽略 `.env*`，避免误提交凭据。
+
 交付前建议先跑完整发布验证：
 
 ```bash

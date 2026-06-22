@@ -4,6 +4,8 @@ node_modules/
 .vite/
 .npm-cache/
 .tmp/
+.env*
+!.env.acceptance.example
 data/
 bin/
 qa-*.png

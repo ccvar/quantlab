@@ -95,6 +95,8 @@ Real sandbox completion is intentionally manual. Add these repository secrets, t
 
 That workflow starts the local client on `127.0.0.1:8787`, runs `audit:final` with `CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true`, enforces `npm run audit:complete`, and uploads sanitized final audit reports. It does not print or artifact API keys, API secrets, OKX passphrases, Vault passphrases, ciphertext, salt, or nonce.
 
+For a step-by-step operator checklist, see `docs/real-sandbox-acceptance.zh-CN.md`. For local runs, copy `.env.acceptance.example` to `.env.acceptance.local`, fill sandbox-only credentials, and source it before `npm run audit:final`.
+
 Cross-compile examples:
 
 ```bash
