@@ -45,12 +45,13 @@ jobs:
         run: |
           test -s "dist/native/macos/ccvar-quant-lab-macos-native.zip"
           test -s "dist/native/macos/SHA256SUMS.txt"
-          shasum -a 256 -c "dist/native/macos/SHA256SUMS.txt"
-          plutil -lint "dist/native/macos/CCVar Quant Lab.app/Contents/Info.plist"
-          file "dist/native/macos/CCVar Quant Lab.app/Contents/MacOS/CCVar Quant Lab" | grep "Mach-O universal binary"
-          file "dist/native/macos/CCVar Quant Lab.app/Contents/MacOS/ccvar-quant" | grep "Mach-O universal binary"
-          unzip -l "dist/native/macos/ccvar-quant-lab-macos-native.zip" | grep "CCVar Quant Lab.app/Contents/MacOS/CCVar Quant Lab"
-          unzip -l "dist/native/macos/ccvar-quant-lab-macos-native.zip" | grep "CCVar Quant Lab Web.app/Contents/MacOS/CCVar Quant Lab Web"
+          cd "dist/native/macos"
+          shasum -a 256 -c "SHA256SUMS.txt"
+          plutil -lint "CCVar Quant Lab.app/Contents/Info.plist"
+          file "CCVar Quant Lab.app/Contents/MacOS/CCVar Quant Lab" | grep "Mach-O universal binary"
+          file "CCVar Quant Lab.app/Contents/MacOS/ccvar-quant" | grep "Mach-O universal binary"
+          unzip -l "ccvar-quant-lab-macos-native.zip" | grep "CCVar Quant Lab.app/Contents/MacOS/CCVar Quant Lab"
+          unzip -l "ccvar-quant-lab-macos-native.zip" | grep "CCVar Quant Lab Web.app/Contents/MacOS/CCVar Quant Lab Web"
 
       - name: Upload native macOS package
         uses: actions/upload-artifact@v4
