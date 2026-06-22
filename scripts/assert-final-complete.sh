@@ -125,7 +125,7 @@ if (real.status !== "passed" || missing.length > 0 || (real.missingExchanges || 
     missingExchanges: missing.length > 0 ? missing : real.missingExchanges || [],
     credentialReadiness: report.realSandboxCredentialReadiness || null,
     nextCommand:
-      "CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true CCVAR_FINAL_AUDIT_REAL_EXCHANGES=Binance,OKX BINANCE_TESTNET_API_KEY=... BINANCE_TESTNET_API_SECRET=... OKX_DEMO_API_KEY=... OKX_DEMO_SECRET=... OKX_DEMO_API_PASSPHRASE=... npm run audit:final",
+      "CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true CCVAR_FINAL_AUDIT_REAL_EXCHANGES=Binance,OKX BINANCE_TESTNET_API_KEY=... BINANCE_TESTNET_API_SECRET=... OKX_DEMO_API_KEY=... OKX_DEMO_API_SECRET=... OKX_DEMO_API_PASSPHRASE=... npm run audit:final",
   });
 }
 

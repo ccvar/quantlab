@@ -12,3 +12,4 @@ When implementing from a selected generated mock, treat that image as the source
 - Keep UI copy maintainable through `src/i18n/`, with one translation file per locale and a top-bar language switcher.
 - Initial exchange scope is Binance Spot Testnet/Demo and OKX Demo Trading; production/mainnet trading remains disabled until real sandbox acceptance is completed.
 - GitHub Actions must build the embedded Web UI and package desktop clients for macOS and Windows.
+- macOS and Windows delivery must include both a standalone native desktop client and a browser-launcher entry; the native client should render the local Web UI inside the app window instead of opening an external browser.

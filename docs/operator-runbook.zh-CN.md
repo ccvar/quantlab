@@ -57,7 +57,7 @@ OKX Demo Trading：
 ```bash
 CCVAR_ACCEPTANCE_EXCHANGE=OKX \
 OKX_DEMO_API_KEY=... \
-OKX_DEMO_SECRET=... \
+OKX_DEMO_API_SECRET=... \
 OKX_DEMO_API_PASSPHRASE=... \
 npm run acceptance:live
 ```
@@ -166,18 +166,23 @@ mock 私有端点只能在显式设置 `CCVAR_ENABLE_LOOPBACK_EXCHANGE_MOCKS=tru
 
 ## GitHub Actions 构建
 
-仓库包含 `.github/workflows/build-clients.yml`，会在 push、pull request 和手动触发时运行：
+仓库包含 `.github/workflows/build-clients.yml` 和 `.github/workflows/native-desktop-clients.yml`，会在 push、pull request 和手动触发时运行：
 
 - `Test and Build Web UI`：安装 Node/Go 依赖，构建嵌入式 Web UI，运行 `go test ./...`，构建本地 Web 客户端二进制，并上传 `ccvar-web-embedded-ui` artifact。
-- `Package macOS and Windows Clients`：运行 `npm run verify:release`，重新打包并验证 macOS arm64 和 Windows amd64 客户端，然后上传 `ccvar-desktop-release` artifact。
+- `Package macOS and Windows Clients`：运行 `npm run verify:release`，重新打包并验证 macOS arm64 和 Windows amd64 浏览器启动器包，然后上传 `ccvar-desktop-release` artifact。
+- `Native macOS Client`：在 macOS runner 上编译 AppKit/WKWebView 独立客户端和 `CCVar Quant Lab Web.app` 浏览器启动器，然后上传 `ccvar-native-macos` artifact。
+- `Native Windows Client`：在 Windows runner 上编译 WinForms/WebView2 独立客户端和 `Start CCVar Quant Lab Web.cmd` 浏览器启动器，然后上传 `ccvar-native-windows` artifact。
 
 CI 产物包含：
 
 - Web 静态资源：`cmd/ccvar-quant/web`
-- macOS arm64 zip：`ccvar-quant-lab-macos-arm64.zip`
-- Windows amd64 zip：`ccvar-quant-lab-windows-amd64.zip`
+- 便携浏览器启动器：`ccvar-quant-lab-macos-arm64.zip`、`ccvar-quant-lab-windows-amd64.zip`
+- 原生 macOS 客户端：`ccvar-quant-lab-macos-native.zip`，包含 `CCVar Quant Lab.app` 和 `CCVar Quant Lab Web.app`
+- 原生 Windows 客户端：`ccvar-quant-lab-windows-native.zip`，包含 `CCVar Quant Lab.exe` 和 `Start CCVar Quant Lab Web.cmd`
 - 校验文件：`SHA256SUMS.txt`
 - 机器可读 manifest：`release-manifest.json`
+
+构建未签名的原生桌面包不需要额外 GitHub Secrets。Apple Developer ID、notarization 凭据或 Windows 代码签名证书可以等到公开分发/上架前再接入。
 
 仓库还包含 `.github/workflows/real-sandbox-acceptance.yml`，用于真实 Binance / OKX 沙盒最终门禁。先在 GitHub Repository Secrets 中配置：
 
@@ -229,8 +234,12 @@ npm run audit:final
 
 - macOS arm64: `dist/desktop/ccvar-quant-lab-macos-arm64.zip`
 - Windows amd64: `dist/desktop/ccvar-quant-lab-windows-amd64.zip`
+- macOS 原生客户端: `dist/native/macos/ccvar-quant-lab-macos-native.zip`
+- Windows 原生客户端: `dist/native/windows/ccvar-quant-lab-windows-native.zip`
 - SHA-256 校验: `dist/desktop/SHA256SUMS.txt`
 - 机器可读 manifest: `dist/desktop/release-manifest.json`
+
+原生 macOS zip 里有两个 app：`CCVar Quant Lab.app` 是不打开浏览器的独立桌面客户端，使用 WKWebView 渲染同一套嵌入式 UI；`CCVar Quant Lab Web.app` 是浏览器启动器。原生 Windows zip 里也有两个入口：`CCVar Quant Lab.exe` 是 WebView2 独立桌面客户端，`Start CCVar Quant Lab Web.cmd` 是浏览器启动器。
 
 `release-manifest.json` 会记录 macOS/Windows zip 文件的 SHA-256，也会记录关键包内文件的相对路径、大小和 SHA-256，包括 README、启动器、桌面二进制、随包文档和 macOS `Info.plist`。`npm run verify:release` 会逐项重新计算这些 hash，并会解压最终 zip 后再次校验交付包里的真实内容。
 

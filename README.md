@@ -9,8 +9,9 @@ CCVar Quant Lab is built around a safe progression: AI simulation, shadow/paper 
 ## What Ships
 
 - Web app served by the Go local API at `http://127.0.0.1:8787/`.
-- macOS arm64 `.app` package with automatic browser launch, local data path, logs, bundled docs, and deterministic zip artifact.
-- Windows amd64 portable package with `.cmd` launcher, local `%APPDATA%` database/log paths, bundled docs, and deterministic zip artifact.
+- Native macOS desktop package with two apps: `CCVar Quant Lab.app` as the standalone WKWebView client, and `CCVar Quant Lab Web.app` as the browser launcher.
+- Native Windows desktop package with two launchers: `CCVar Quant Lab.exe` as the standalone WebView2 client, and `Start CCVar Quant Lab Web.cmd` as the browser launcher.
+- Portable browser-launcher desktop packages under `dist/desktop/` for deterministic release verification.
 - SQLite local storage, encrypted credential Vault, hash-chained audit log, paper ledger, backtest history, account snapshots, and guarded execution ledger.
 - Bilingual UI with Simplified Chinese and English language switching.
 - Final audit scripts that block completion until both Binance and OKX real sandbox acceptance reports pass.
@@ -22,6 +23,8 @@ CCVar Quant Lab is built around a safe progression: AI simulation, shadow/paper 
 - React + Vite frontend
 - Lightweight Charts for market/equity views
 - IBM Plex Sans/Mono typography
+- macOS AppKit + WKWebView native host
+- Windows WinForms + WebView2 native host
 
 ## Internationalization
 
@@ -31,7 +34,7 @@ The UI language files live under `src/i18n/`, one module per locale:
 - `src/i18n/en-US.js`
 - `src/i18n/index.js`
 
-The language switcher is in the top bar and persists the selected locale in `localStorage` as `ccvar.locale`. The same embedded UI is used by the Web server, macOS app, and Windows launcher, so all three delivery targets share the same i18n resources.
+The language switcher is in the top bar and persists the selected locale in `localStorage` as `ccvar.locale`. The same embedded UI is used by the Web server, macOS native app, Windows native app, and browser launchers, so all delivery targets share the same i18n resources.
 
 When adding new UI copy, add the key to both locale files and call the translator through `t("path.to.key", "English fallback")`. Keep protocol values, exchange names, symbols, environment names, and audit/model output as raw data unless they are purely UI chrome.
 
@@ -73,17 +76,23 @@ If the client is launched with `--open` while another CCVar Quant instance is al
 
 ## GitHub Actions
 
-The repository includes `.github/workflows/build-clients.yml` and `.github/workflows/real-sandbox-acceptance.yml`.
+The repository includes `.github/workflows/build-clients.yml`, `.github/workflows/native-desktop-clients.yml`, and `.github/workflows/real-sandbox-acceptance.yml`.
 
 It runs on push, pull request, and manual dispatch:
 
 - `Test and Build Web UI`: installs Node/Go dependencies, builds the embedded Web UI, runs `go test ./...`, builds the local Web client binary, and uploads `ccvar-web-embedded-ui`.
-- `Package macOS and Windows Clients`: runs `npm run verify:release`, which rebuilds and verifies deterministic macOS/Windows desktop packages, then uploads `ccvar-desktop-release`.
+- `Package macOS and Windows Clients`: runs `npm run verify:release`, which rebuilds and verifies deterministic macOS/Windows browser-launcher desktop packages, then uploads `ccvar-desktop-release`.
+- `Native macOS Client`: builds the standalone AppKit/WKWebView client and the macOS browser-launcher app on a macOS runner, then uploads `ccvar-native-macos`.
+- `Native Windows Client`: builds the standalone WinForms/WebView2 client and the Windows browser-launcher command on a Windows runner, then uploads `ccvar-native-windows`.
 
 CI artifacts:
 
 - `ccvar-web-embedded-ui`: static assets under `cmd/ccvar-quant/web`.
-- `ccvar-desktop-release`: macOS arm64 zip, Windows amd64 zip, `SHA256SUMS.txt`, and `release-manifest.json`.
+- `ccvar-desktop-release`: portable browser-launcher macOS arm64 zip, Windows amd64 zip, `SHA256SUMS.txt`, and `release-manifest.json`.
+- `ccvar-native-macos`: native macOS zip containing `CCVar Quant Lab.app`, `CCVar Quant Lab Web.app`, and `SHA256SUMS.txt`.
+- `ccvar-native-windows`: native Windows zip containing `CCVar Quant Lab.exe`, `Start CCVar Quant Lab Web.cmd`, and `SHA256SUMS.txt`.
+
+No extra GitHub Secrets are required to build unsigned native desktop packages. Apple Developer ID, notarization credentials, or Windows code-signing certificates can be added later when you want notarized/signed public distribution.
 
 Real sandbox completion is intentionally manual. Add these repository secrets, then run the `Real Sandbox Acceptance` workflow from GitHub Actions:
 
@@ -108,7 +117,11 @@ Desktop delivery packages:
 
 ```bash
 npm run package:desktop
+npm run package:native:macos
+npm run package:native:windows
 ```
+
+`package:desktop` creates deterministic portable browser-launcher packages used by the release verifier. `package:native:macos` must run on macOS because it compiles the AppKit/WKWebView host; it outputs a universal macOS native package. `package:native:windows` must run on Windows with .NET 8 because it compiles the WinForms/WebView2 host.
 
 Full release verification:
 
@@ -139,8 +152,12 @@ This creates:
 - `dist/desktop/ccvar-quant-lab-windows-amd64.zip`
 - `dist/desktop/SHA256SUMS.txt`
 - `dist/desktop/release-manifest.json`
+- `dist/native/macos/ccvar-quant-lab-macos-native.zip`
+- `dist/native/windows/ccvar-quant-lab-windows-native.zip`
 
-The macOS app stores data in `~/Library/Application Support/CCVar Quant Lab/ccvar_quant.db` and logs in `~/Library/Application Support/CCVar Quant Lab/logs/client.log`. The Windows launcher stores data in `%APPDATA%\CCVar Quant Lab\ccvar_quant.db` and logs in `%APPDATA%\CCVar Quant Lab\logs\client.log`. Both launchers start the local API on `127.0.0.1:8787` and open the browser automatically. Double-clicking again opens the already-running local client instead of starting a competing server. `CCVAR_ADDR` and `CCVAR_DB_PATH` can override those defaults.
+The native macOS package contains two apps. `CCVar Quant Lab.app` starts the local API and renders the UI inside a native WKWebView window. `CCVar Quant Lab Web.app` starts the same local API and opens the default browser. The native Windows package mirrors that split with `CCVar Quant Lab.exe` for the WebView2 desktop client and `Start CCVar Quant Lab Web.cmd` for the browser launcher.
+
+The macOS clients store data in `~/Library/Application Support/CCVar Quant Lab/ccvar_quant.db` and logs in `~/Library/Application Support/CCVar Quant Lab/logs/client.log`. The Windows clients store data in `%APPDATA%\CCVar Quant Lab\ccvar_quant.db` and logs in `%APPDATA%\CCVar Quant Lab\logs\client.log`. All desktop entries start the local API on `127.0.0.1:8787`; browser launchers also open the default browser. `CCVAR_ADDR` and `CCVAR_DB_PATH` can override those defaults.
 
 `SHA256SUMS.txt` and `release-manifest.json` are generated by the packaging script so desktop zip files can be verified before distribution. The release manifest records zip artifact hashes plus critical package file hashes for README files, launchers, desktop binaries, bundled docs, and macOS metadata. The macOS and Windows packages also include README files that state the local URL, data paths, environment overrides, checksum workflow, and production/mainnet-disabled safety boundary.
 Both desktop packages include `docs/operator-runbook.zh-CN.md` and `docs/safety.md`; the macOS app also embeds the same docs under `Contents/Resources/docs`.
@@ -169,7 +186,7 @@ npm run acceptance:live
 ```bash
 CCVAR_ACCEPTANCE_EXCHANGE=OKX \
 OKX_DEMO_API_KEY=... \
-OKX_DEMO_SECRET=... \
+OKX_DEMO_API_SECRET=... \
 OKX_DEMO_API_PASSPHRASE=... \
 npm run acceptance:live
 ```
@@ -186,7 +203,7 @@ CCVAR_FINAL_AUDIT_REAL_EXCHANGES=Binance,OKX \
 BINANCE_TESTNET_API_KEY=... \
 BINANCE_TESTNET_API_SECRET=... \
 OKX_DEMO_API_KEY=... \
-OKX_DEMO_SECRET=... \
+OKX_DEMO_API_SECRET=... \
 OKX_DEMO_API_PASSPHRASE=... \
 npm run audit:final
 ```

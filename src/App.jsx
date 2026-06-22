@@ -169,6 +169,19 @@ function writeStoredLocale(locale) {
   }
 }
 
+function useEscapeToClose(open, onClose) {
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -401,12 +414,16 @@ const defaultVaultTestForm = {
   symbol: "BTCUSDT",
 };
 
+const chartTimeframes = ["1m", "5m", "15m", "1h", "4h", "1D"];
+
 export function App() {
   const [locale, setLocale] = useState(() => {
     if (typeof window === "undefined") return "zh-CN";
     return resolveLocale(readStoredLocale() || window.navigator?.language);
   });
   const t = useMemo(() => makeTranslator(locale), [locale]);
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
   const [labState, setLabState] = useState(fallbackLabState);
   const [sourceStatus, setSourceStatus] = useState("loading");
   const [selectedRun, setSelectedRun] = useState(0);
@@ -415,6 +432,8 @@ export function App() {
   const [workspaceTab, setWorkspaceTab] = useState("Real-time Sim");
   const [bottomTab, setBottomTab] = useState("Performance");
   const [eventFilter, setEventFilter] = useState("All");
+  const [timeframe, setTimeframe] = useState("15m");
+  const [showArchivedRuns, setShowArchivedRuns] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isStopped, setIsStopped] = useState(false);
   const [isRunStopped, setIsRunStopped] = useState(false);
@@ -476,6 +495,23 @@ export function App() {
   const [isRunningBacktest, setIsRunningBacktest] = useState(false);
   const [appInfo, setAppInfo] = useState(defaultAppInfo);
   const [preflight, setPreflight] = useState(defaultPreflight);
+
+  function notify(message, tone = "info") {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToast({ id: Date.now(), tone, message });
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3200);
+  }
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof document !== "undefined") {
@@ -594,6 +630,44 @@ export function App() {
     return labState.events.filter((event) => event.type.includes(eventFilter));
   }, [eventFilter, labState]);
 
+  function handleLocaleChange(nextLocale) {
+    const resolved = resolveLocale(nextLocale);
+    setLocale(resolved);
+    notify(resolved === "zh-CN" ? t("toast.switchedChinese", "Switched to Chinese") : t("toast.switchedEnglish", "Switched to English"), "success");
+  }
+
+  function handleTimeframeChange(nextTimeframe) {
+    setTimeframe(nextTimeframe);
+    notify(t("toast.timeframeChanged", "Timeframe switched to {value}", { value: nextTimeframe }), "success");
+  }
+
+  function handleFeatureNotice(label, message) {
+    notify(message || t("toast.openStrategyForConfig", "{label}: use Strategy Profile for configuration", { label }), "info");
+  }
+
+  function handleRestartRun() {
+    setIsPaused(false);
+    setIsRunStopped(false);
+    setReplaySpeed(1);
+    notify(t("toast.runRestarted", "Simulation controls reset"), "success");
+  }
+
+  function handleRunSelect(index) {
+    setSelectedRun(index);
+    const run = labState.runs[index];
+    if (run) {
+      notify(t("toast.runSelected", "Selected {name}", { name: run.name }), "success");
+    }
+  }
+
+  function handleToggleArchivedRuns() {
+    setShowArchivedRuns((value) => {
+      const next = !value;
+      notify(next ? t("toast.archivedShown", "Archived run drawer opened") : t("toast.archivedHidden", "Archived run drawer closed"), "info");
+      return next;
+    });
+  }
+
   async function handleSimStep() {
     setIsSimulating(true);
     try {
@@ -609,6 +683,7 @@ export function App() {
       await refreshPaperAccount();
       await refreshPaperExecutions();
       setSourceStatus("api");
+      notify(t("toast.aiStepComplete", "AI step completed"), "success");
     } catch (error) {
       const now = new Date();
       setLabState((current) => ({
@@ -628,6 +703,7 @@ export function App() {
         ].slice(0, 12),
       }));
       setSourceStatus("fallback");
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
     } finally {
       setIsSimulating(false);
     }
@@ -637,6 +713,7 @@ export function App() {
     if (isResettingPaper) return;
     if (isSimulating || autopilot?.running) {
       setPaperResetStatus({ tone: "warn", message: "Stop AI first" });
+      notify(t("toast.stopAiFirst", "Stop AI before resetting paper ledger"), "warn");
       return;
     }
     const phrase = window.prompt(t("prompt.resetPaper", "Type RESET PAPER to clear the local paper ledger."));
@@ -653,8 +730,10 @@ export function App() {
       await refreshPaperExecutions();
       await refreshAuditLog();
       setPaperResetStatus({ tone: "success", message: `Reset ${payload.deletedRecords || 0}` });
+      notify(t("toast.paperReset", "Paper ledger reset"), "success");
     } catch (error) {
       setPaperResetStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
       await refreshAuditLog();
     } finally {
       setIsResettingPaper(false);
@@ -706,9 +785,11 @@ export function App() {
         label: current.label,
       }));
       setCredentialStatus({ tone: "success", message: "Saved encrypted" });
+      notify(t("toast.credentialSaved", "Credential saved encrypted"), "success");
       await refreshPreflight();
     } catch (error) {
       setCredentialStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
     } finally {
       setIsSavingCredential(false);
     }
@@ -720,9 +801,11 @@ export function App() {
       await deleteCredential(id);
       setCredentials((current) => current.filter((credential) => credential.id !== id));
       setCredentialStatus({ tone: "success", message: "Deleted" });
+      notify(t("toast.credentialDeleted", "Credential deleted"), "success");
       await refreshPreflight();
     } catch (error) {
       setCredentialStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
     }
   }
 
@@ -731,10 +814,12 @@ export function App() {
     const credential = credentials.find((item) => String(item.id) === String(vaultTestForm.credentialId));
     if (!credential) {
       setVaultTestStatus({ tone: "warn", message: "Select key" });
+      notify(t("toast.selectKey", "Select a saved key first"), "warn");
       return;
     }
     if (!vaultTestForm.passphrase) {
       setVaultTestStatus({ tone: "warn", message: "Passphrase required" });
+      notify(t("toast.passphraseRequired", "Passphrase required"), "warn");
       return;
     }
     const environment = credential.exchange === "OKX" ? "demo" : vaultTestForm.environment || "testnet";
@@ -768,9 +853,11 @@ export function App() {
       }
       await refreshAuditLog();
       await refreshPreflight();
+      notify(t("toast.connectionTested", "Connection test finished"), result.snapshot?.canTrade ? "success" : "warn");
     } catch (error) {
       setVaultTestResult(null);
       setVaultTestStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
       await refreshAuditLog();
       await refreshPreflight();
     } finally {
@@ -1026,8 +1113,10 @@ export function App() {
       setBacktestResult(null);
       setBacktestStatus({ tone: "warn", message: "Run needed" });
       await refreshAuditLog();
+      notify(t("toast.strategySaved", "Strategy saved"), "success");
     } catch (error) {
       setStrategyProfileStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
     } finally {
       setIsSavingStrategyProfile(false);
     }
@@ -1043,7 +1132,7 @@ export function App() {
         symbol: strategyProfile.symbol || labState.meta.selectedMarket || "BTCUSDT",
         side: strategyProfile.side,
         orderSizeUsdt: Number(strategyProfile.orderSizeUsdt || 500),
-        interval: "15m",
+        interval: timeframe,
         limit: 200,
         fastWindow: 6,
         slowWindow: 18,
@@ -1052,8 +1141,10 @@ export function App() {
       setBacktestStatus({ tone: "success", message: `${result.summary.tradeCount} trades` });
       setSourceStatus("api");
       await refreshBacktestRuns();
+      notify(t("toast.backtestComplete", "Backtest completed"), "success");
     } catch (error) {
       setBacktestStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
     } finally {
       setIsRunningBacktest(false);
     }
@@ -1073,8 +1164,10 @@ export function App() {
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       setWorkspaceExportStatus({ tone: "success", message: "Saved" });
+      notify(t("toast.workspaceExported", "Workspace export downloaded"), "success");
     } catch (error) {
       setWorkspaceExportStatus({ tone: "danger", message: error.message || "Failed" });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message || "export failed" }), "danger");
     } finally {
       setIsExportingWorkspace(false);
     }
@@ -1105,8 +1198,10 @@ export function App() {
       await refreshPaperExecutions();
       await refreshPaperAccount();
       await refreshAuditLog();
+      notify(t("toast.localDataPruned", "Local research data pruned"), "success");
     } catch (error) {
       setLocalDataStatus({ tone: "danger", message: error.message || "Failed" });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message || "prune failed" }), "danger");
       await refreshAuditLog();
       await refreshLocalData();
     } finally {
@@ -1131,10 +1226,12 @@ export function App() {
       await refreshAutopilotRuns();
       await refreshAuditLog();
       await refreshPreflight();
+      notify(nextAction === "activate" ? t("toast.killActivated", "Kill switch activated") : t("toast.killResumed", "Kill switch resumed"), nextAction === "activate" ? "warn" : "success");
     } catch {
       setIsStopped((value) => !value);
       await refreshKillSwitch();
       await refreshPreflight();
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: "kill switch unavailable" }), "danger");
     }
   }
 
@@ -1155,6 +1252,7 @@ export function App() {
         await refreshPaperExecutions();
         await refreshAuditLog();
         await refreshPreflight();
+        notify(t("toast.autopilotStopped", "Autopilot stopped"), "success");
         return;
       }
       const autopilotMode = mode === "Live" ? "live" : mode === "Paper" ? "paper" : "shadow";
@@ -1187,6 +1285,7 @@ export function App() {
       await refreshLiveExecutions();
       await refreshLiveReconciliations();
       await refreshPreflight();
+      notify(t("toast.autopilotStarted", "Autopilot started"), "success");
     } catch (error) {
       setAutopilot((current) => ({
         ...current,
@@ -1197,6 +1296,7 @@ export function App() {
       }));
       await refreshAuditLog();
       await refreshPreflight();
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
     } finally {
       setIsUpdatingAutopilot(false);
     }
@@ -1211,8 +1311,10 @@ export function App() {
       setLiveGuardStatus({ tone: state.unlocked ? "success" : "warn", message: state.message || "Updated" });
       await refreshAuditLog();
       await refreshPreflight();
+      notify(action === "unlock" ? t("toast.guardUnlocked", "Live Guard updated") : t("toast.guardLocked", "Live Guard locked"), state.unlocked ? "success" : "warn");
     } catch (error) {
       setLiveGuardStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
       await refreshLiveGuard();
       await refreshAuditLog();
       await refreshPreflight();
@@ -1247,9 +1349,11 @@ export function App() {
       await refreshLiveExecutions();
       await refreshLiveReconciliations();
       await refreshPreflight();
+      notify(t("toast.executionComplete", "AI execution attempt recorded"), approved ? "success" : "warn");
     } catch (error) {
       setLiveExecutionStatus({ tone: "danger", message: error.message });
       setLiveExecutionResult(null);
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
       await refreshAuditLog();
       await refreshLiveGuard();
       await refreshLiveExecutions();
@@ -1276,8 +1380,10 @@ export function App() {
       await refreshLiveReconciliations();
       await refreshAuditLog();
       await refreshLiveExecutions();
+      notify(t("toast.reconciled", "Reconciliation finished"), "success");
     } catch (error) {
       setReconciliationStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
       await refreshAuditLog();
       await refreshLiveReconciliations();
     } finally {
@@ -1309,10 +1415,12 @@ export function App() {
       });
       await refreshAuditLog();
       await refreshPreflight();
+      notify(t("toast.accountSynced", "Account snapshot synced"), "success");
     } catch (error) {
       setAccountSnapshot(null);
       setAccountSnapshotMeta(null);
       setAccountSyncStatus({ tone: "danger", message: error.message });
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
       await refreshAuditLog();
       await refreshPreflight();
     } finally {
@@ -1368,7 +1476,7 @@ export function App() {
       <TopBar
         t={t}
         locale={locale}
-        setLocale={setLocale}
+        setLocale={handleLocaleChange}
         meta={labState.meta}
         mode={mode}
         modeTone={modeTone}
@@ -1390,11 +1498,29 @@ export function App() {
       <section className="lab-grid">
         <aside className="left-rail">
           <BrandBlock appInfo={appInfo} />
-          <ExperimentRuns t={t} runs={labState.runs} selectedRun={selectedRun} onSelect={setSelectedRun} />
+          <ExperimentRuns
+            t={t}
+            runs={labState.runs}
+            selectedRun={selectedRun}
+            onSelect={handleRunSelect}
+            showArchived={showArchivedRuns}
+            onToggleArchived={handleToggleArchivedRuns}
+            onNewRun={() => {
+              setWorkspaceTab("Backtest");
+              notify(t("toast.newRunHint", "Use Backtest or Autopilot to create a new run"), "info");
+            }}
+            onConfigure={() => setIsStrategyPanelOpen(true)}
+          />
           <SimulationControls
             t={t}
             meta={labState.meta}
             dataSource={dataSource}
+            setDataSource={(value) => {
+              setDataSource(value);
+              notify(t("toast.exchangeChanged", "Exchange switched to {value}", { value }), "success");
+            }}
+            timeframe={timeframe}
+            onTimeframeChange={handleTimeframeChange}
             isPaused={isPaused}
             isStopped={isStopped || isRunStopped}
             stopLocked={isStopped}
@@ -1403,6 +1529,9 @@ export function App() {
             setIsStopped={setIsRunStopped}
             setReplaySpeed={setReplaySpeed}
             onSimStep={handleSimStep}
+            onRestart={handleRestartRun}
+            onOpenStrategy={() => setIsStrategyPanelOpen(true)}
+            onActionNotice={handleFeatureNotice}
             isSimulating={isSimulating}
             autopilot={autopilot}
             autopilotRuns={autopilotRuns}
@@ -1433,6 +1562,10 @@ export function App() {
             backtestStatus={backtestStatus}
             isRunningBacktest={isRunningBacktest}
             onRunBacktest={handleRunBacktest}
+            timeframe={timeframe}
+            onTimeframeChange={handleTimeframeChange}
+            onOpenStrategy={() => setIsStrategyPanelOpen(true)}
+            onActionNotice={handleFeatureNotice}
           />
           <BottomPanel
             active={bottomTab}
@@ -1450,6 +1583,7 @@ export function App() {
             events={visibleEvents}
             eventFilter={eventFilter}
             setEventFilter={setEventFilter}
+            onNotify={notify}
             meta={labState.meta}
             t={t}
           />
@@ -1539,12 +1673,26 @@ export function App() {
           refreshLocalData();
           refreshAppInfo();
           refreshPreflight();
+          notify(t("toast.refreshed", "Refreshed"), "success");
         }}
         isUpdating={isUpdatingLiveGuard}
         isExecuting={isExecutingLive}
         isSyncingAccount={isSyncingAccount}
       />
+      <ToastMessage toast={toast} onClose={() => setToast(null)} />
     </main>
+  );
+}
+
+function ToastMessage({ toast, onClose }) {
+  if (!toast) return null;
+  return (
+    <div className={classNames("toast-message", toast.tone)} role="status" aria-live="polite">
+      <span>{toast.message}</span>
+      <button type="button" onClick={onClose} aria-label="Close notification">
+        <X size={14} />
+      </button>
+    </div>
   );
 }
 
@@ -1566,6 +1714,7 @@ function CredentialPanel({
   isSaving,
   isTesting,
 }) {
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
   const setField = (field, value) => {
@@ -1591,7 +1740,7 @@ function CredentialPanel({
             <h2 id="credential-title">{t("vault.title", "Exchange Vault")}</h2>
             <span><LockKeyhole size={13} /> {t("vault.subtitle", "Local encrypted credentials")}</span>
           </div>
-          <button className="icon-close" onClick={onClose} aria-label={t("vault.close", "Close credentials")}>
+          <button className="icon-close" type="button" onClick={onClose} aria-label={t("vault.close", "Close credentials")}>
             <X size={16} />
           </button>
         </header>
@@ -1719,7 +1868,7 @@ function CredentialPanel({
                       <span>READ</span>
                       {credential.permissions.trade ? <span>TRADE</span> : null}
                     </div>
-                    <button onClick={() => onDelete(credential.id)} aria-label={t("vault.deleteKey", "Delete {label}", { label: credential.label })}>
+                    <button type="button" onClick={() => onDelete(credential.id)} aria-label={t("vault.deleteKey", "Delete {label}", { label: credential.label })}>
                       <Trash2 size={14} />
                     </button>
                   </article>
@@ -1821,6 +1970,7 @@ function CredentialPanel({
 }
 
 function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, isSaving }) {
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
   return (
@@ -1831,7 +1981,7 @@ function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, is
             <h2 id="strategy-title">{t("strategy.title", "Strategy Profile")}</h2>
             <span><Brain size={13} /> {t("strategy.subtitle", "AI intent defaults for simulation and Autopilot")}</span>
           </div>
-          <button className="icon-close" onClick={onClose} aria-label={t("strategy.close", "Close strategy profile")}>
+          <button className="icon-close" type="button" onClick={onClose} aria-label={t("strategy.close", "Close strategy profile")}>
             <X size={16} />
           </button>
         </header>
@@ -1974,6 +2124,7 @@ function LiveGuardPanel({
   isExecuting,
   isSyncingAccount,
 }) {
+  useEscapeToClose(open, onClose);
   if (!open) return null;
 
   const setField = (field, value) => {
@@ -2099,7 +2250,7 @@ function LiveGuardPanel({
             <h2 id="live-guard-title">{t("guard.title", "Live Guard")}</h2>
             <span><ShieldCheck size={13} /> {t("guard.subtitle", "Testnet unlock and audit trail")}</span>
           </div>
-          <button className="icon-close" onClick={onClose} aria-label={t("guard.close", "Close live guard")}>
+          <button className="icon-close" type="button" onClick={onClose} aria-label={t("guard.close", "Close live guard")}>
             <X size={16} />
           </button>
         </header>
@@ -2251,11 +2402,11 @@ function LiveGuardPanel({
             </label>
 
             <div className="guard-actions">
-              <button className="save-credential" onClick={onUnlock} disabled={isUpdating}>
+              <button className="save-credential" type="button" onClick={onUnlock} disabled={isUpdating}>
                 <ShieldCheck size={14} />
                 {isUpdating ? t("panels.updating", "UPDATING") : t("guard.unlockTestnet", "UNLOCK TESTNET")}
               </button>
-              <button className="lock-live" onClick={onLock} disabled={isUpdating}>
+              <button className="lock-live" type="button" onClick={onLock} disabled={isUpdating}>
                 <Square size={13} />
                 {t("guard.lock", "LOCK")}
               </button>
@@ -2462,7 +2613,7 @@ function LiveGuardPanel({
                 <Download size={10} />
                 {isExportingWorkspace ? t("common.exporting", "Exporting") : t("common.export", "Export")}
               </button>
-              <button onClick={onRefresh}>{t("common.refresh", "Refresh")}</button>
+              <button type="button" onClick={onRefresh}>{t("common.refresh", "Refresh")}</button>
             </div>
             <div className="client-info-card">
               <div className="ledger-title">
@@ -2644,7 +2795,7 @@ function TopBar({
           tone={modeTone}
           labelFor={(item) => choiceLabel(t, item)}
         />
-        <button className="guard-link" onClick={onOpenLiveGuard}>
+        <button className="guard-link" type="button" onClick={onOpenLiveGuard}>
           <LockKeyhole size={11} />
           {t("top.guard", "Guard")}
           <strong className={liveGuard?.unlocked ? "success-text" : "warn-text"}>
@@ -2676,7 +2827,7 @@ function TopBar({
           values={["zh-CN", "en-US"]}
           onChange={(value) => setLocale(resolveLocale(value))}
           icon={<Languages size={14} />}
-          labelFor={(item) => (item === "zh-CN" ? "中" : "EN")}
+          labelFor={(item) => (item === "zh-CN" ? t("top.languageChinese", "中文") : "English")}
         />
       </div>
 
@@ -2684,7 +2835,7 @@ function TopBar({
       <MetricTile label={t("top.dailyPnl", "Daily PnL")} value={`+${formatMoney(meta.dailyPnl)} USDT`} sub={`+${meta.dailyPnlPct.toFixed(2)}%`} tone="positive" />
       <MetricTile label={t("top.dailyDrawdown", "Daily Drawdown")} value={`${meta.dailyDrawdown.toFixed(2)}%`} tone="negative" />
 
-      <button className={classNames("stop-all", isStopped && "active")} onClick={onToggleKillSwitch} title={killSwitch?.message}>
+      <button className={classNames("stop-all", isStopped && "active")} type="button" onClick={onToggleKillSwitch} title={killSwitch?.message}>
         {isStopped ? <Play size={16} /> : <Square size={16} />}
         <span>{isStopped ? t("top.resume", "RESUME") : t("top.stopAll", "STOP ALL")}</span>
         <small>{t("top.killSwitch", "Kill Switch")}</small>
@@ -2694,7 +2845,7 @@ function TopBar({
         <span className="label">{t("top.connection", "Connection")}</span>
         <div><i className="dot success" /> {dataSource} <strong>{meta.dataLatencyMs} ms</strong></div>
         <div><i className={classNames("dot", sourceStatus === "api" ? "success" : "warn")} /> {t("top.localApi", "Local API")} <strong>{sourceStatus}</strong></div>
-        <button className="connection-link" onClick={onOpenCredentials}>
+        <button className="connection-link" type="button" onClick={onOpenCredentials}>
           <ShieldCheck size={12} />
           {t("top.vault", "Vault")}
           <strong>{credentialCount}</strong>
@@ -2708,7 +2859,7 @@ function Segmented({ value, values, onChange, icon, tone, labelFor }) {
   return (
     <div className={classNames("segmented", tone && `tone-${tone}`)}>
       {values.map((item) => (
-        <button key={item} type="button" className={value === item ? "active" : ""} onClick={() => onChange(item)}>
+        <button key={item} type="button" className={value === item ? "active" : ""} aria-pressed={value === item} onClick={() => onChange(item)}>
           {icon && item === value ? icon : null}
           {labelFor ? labelFor(item) : item}
         </button>
@@ -2727,14 +2878,18 @@ function MetricTile({ label, value, sub, tone }) {
   );
 }
 
-function ExperimentRuns({ t, runs, selectedRun, onSelect }) {
+function ExperimentRuns({ t, runs, selectedRun, onSelect, showArchived, onToggleArchived, onNewRun, onConfigure }) {
   return (
     <section className="panel runs-panel">
       <div className="panel-header">
         <h2>{t("panels.experimentRuns", "Experiment Runs")}</h2>
         <div className="icon-row">
-          <button><Plus size={14} /></button>
-          <button><SlidersHorizontal size={14} /></button>
+          <button type="button" onClick={onNewRun} title={t("panels.newRun", "New run")}>
+            <Plus size={14} />
+          </button>
+          <button type="button" onClick={onConfigure} title={t("panels.configureStrategy", "Configure strategy")}>
+            <SlidersHorizontal size={14} />
+          </button>
         </div>
       </div>
       <div className="runs-head">
@@ -2766,7 +2921,13 @@ function ExperimentRuns({ t, runs, selectedRun, onSelect }) {
           </button>
         ))}
       </div>
-      <button className="archive-row">
+      {showArchived ? (
+        <div className="archive-drawer">
+          <span>{t("panels.archivedReady", "Archived runs are retained in local history")}</span>
+          <strong>12</strong>
+        </div>
+      ) : null}
+      <button className={classNames("archive-row", showArchived && "open")} type="button" onClick={onToggleArchived}>
         {t("panels.archived", "Archived ({count})", { count: 12 })}
         <ChevronDown size={14} />
       </button>
@@ -2786,6 +2947,9 @@ function SimulationControls({
   t,
   meta,
   dataSource,
+  setDataSource,
+  timeframe,
+  onTimeframeChange,
   mode,
   isPaused,
   isStopped,
@@ -2795,6 +2959,9 @@ function SimulationControls({
   setIsStopped,
   setReplaySpeed,
   onSimStep,
+  onRestart,
+  onOpenStrategy,
+  onActionNotice,
   isSimulating,
   autopilot,
   autopilotRuns,
@@ -2817,6 +2984,11 @@ function SimulationControls({
   const liveTrace = livePlan?.ai;
   const planConfidence = liveIntent?.confidence ?? liveTrace?.confidence;
   const planTTL = Number(liveIntent?.ttlSeconds || 0);
+  const cycleExchange = () => setDataSource(dataSource === "Binance" ? "OKX" : "Binance");
+  const cycleTimeframe = () => {
+    const index = chartTimeframes.indexOf(timeframe);
+    onTimeframeChange(chartTimeframes[(index + 1) % chartTimeframes.length]);
+  };
   return (
     <section className="panel controls-panel">
       <div className="panel-header">
@@ -2825,35 +2997,47 @@ function SimulationControls({
       <div className="control-grid">
         <label>
           <span>{t("common.market", "Market")}</span>
-          <button className="select-button compact">{dataSource}<ChevronDown size={13} /></button>
+          <button className="select-button compact" type="button" onClick={cycleExchange}>
+            {dataSource}<ChevronDown size={13} />
+          </button>
         </label>
         <label>
           <span>{t("common.symbol", "Symbol")}</span>
-          <button className="select-button compact">{meta.selectedMarket}<ChevronDown size={13} /></button>
+          <button className="select-button compact" type="button" onClick={onOpenStrategy}>
+            {meta.selectedMarket}<ChevronDown size={13} />
+          </button>
         </label>
         <label>
           <span>{t("common.timeframe", "Timeframe")}</span>
-          <button className="select-button compact">15m<ChevronDown size={13} /></button>
+          <button className="select-button compact" type="button" onClick={cycleTimeframe}>
+            {timeframe}<ChevronDown size={13} />
+          </button>
         </label>
         <label>
           <span>{t("common.data", "Data")}</span>
-          <button className="select-button compact">{t("common.live", "Live")}<ChevronDown size={13} /></button>
+          <button
+            className="select-button compact"
+            type="button"
+            onClick={() => onActionNotice(t("common.data", "Data"), t("toast.dataSourceHint", "Public market data refreshes automatically; switch exchange from the Market control"))}
+          >
+            {t("common.live", "Live")}<ChevronDown size={13} />
+          </button>
         </label>
       </div>
       <div className="control-actions">
-        <button className="pause-btn" onClick={() => setIsPaused((value) => !value)}>
+        <button className="pause-btn" type="button" onClick={() => setIsPaused((value) => !value)}>
           {isPaused ? <Play size={15} /> : <Pause size={15} />}
           {isPaused ? t("panels.resume", "RESUME") : t("panels.pause", "PAUSE")}
         </button>
-        <button className="danger-btn" onClick={() => setIsStopped((value) => !value)} disabled={stopLocked}>
+        <button className="danger-btn" type="button" onClick={() => setIsStopped((value) => !value)} disabled={stopLocked}>
           <Square size={14} />
           {stopLocked ? t("panels.killActive", "KILL ACTIVE") : isStopped ? t("panels.resumeRun", "RESUME RUN") : t("panels.stopRun", "STOP RUN")}
         </button>
-        <button>
+        <button type="button" onClick={onRestart}>
           <RotateCcw size={14} />
           {t("panels.restart", "RESTART")}
         </button>
-        <button onClick={onSimStep} disabled={isSimulating || isStopped}>
+        <button type="button" onClick={onSimStep} disabled={isSimulating || isStopped}>
           <Plus size={14} />
           {isSimulating ? t("panels.running", "RUNNING") : t("panels.aiStep", "AI STEP")}
         </button>
@@ -2921,7 +3105,13 @@ function SimulationControls({
           </label>
           <label className="jump-control">
             <span>{t("panels.jumpTo", "Jump To")}</span>
-            <button className="select-button compact">2026-05-24 14:32:18</button>
+            <button
+              className="select-button compact"
+              type="button"
+              onClick={() => onActionNotice(t("panels.jumpTo", "Jump To"), t("toast.jumpHint", "Jump-to-time uses replay history; choose a backtest or run AI step first"))}
+            >
+              2026-05-24 14:32:18
+            </button>
           </label>
         </>
       )}
@@ -2933,7 +3123,7 @@ function WorkspaceTabs({ t, active, setActive }) {
   return (
     <nav className="workspace-tabs">
       {["Real-time Sim", "Backtest", "Shadow Trade"].map((tab) => (
-        <button key={tab} className={active === tab ? "active" : ""} onClick={() => setActive(tab)}>
+        <button key={tab} type="button" className={active === tab ? "active" : ""} onClick={() => setActive(tab)}>
           {choiceLabel(t, tab)}
         </button>
       ))}
@@ -2955,30 +3145,67 @@ function ChartWorkspace({
   backtestStatus,
   isRunningBacktest,
   onRunBacktest,
+  timeframe,
+  onTimeframeChange,
+  onOpenStrategy,
+  onActionNotice,
 }) {
   const lastCandle = candles[candles.length - 1];
+  const [showIndicators, setShowIndicators] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   return (
-    <section className="chart-workspace panel">
+    <section className={classNames("chart-workspace panel", isExpanded && "expanded")}>
       <div className="chart-header">
         <div>
           <h2>{meta.selectedSymbol}</h2>
           <span>{choiceLabel(t, tab)} - {activeRun.name} - {choiceLabel(t, mode)}</span>
         </div>
         <div className="chart-tools">
-          {["1m", "5m", "15m", "1h", "4h", "1D"].map((timeframe) => (
-            <button key={timeframe} className={timeframe === "15m" ? "active" : ""}>{timeframe}</button>
+          {chartTimeframes.map((item) => (
+            <button key={item} type="button" className={item === timeframe ? "active" : ""} onClick={() => onTimeframeChange(item)}>
+              {item}
+            </button>
           ))}
-          <button><BarChart3 size={14} /> {t("panels.indicators", "Indicators")}</button>
+          <button
+            type="button"
+            className={showIndicators ? "active" : ""}
+            onClick={() => {
+              setShowIndicators((value) => !value);
+              onActionNotice(t("panels.indicators", "Indicators"), showIndicators ? t("toast.indicatorsHidden", "Indicators hidden") : t("toast.indicatorsShown", "Indicators shown"));
+            }}
+          >
+            <BarChart3 size={14} /> {t("panels.indicators", "Indicators")}
+          </button>
           {tab === "Backtest" && (
             <button className="active" type="button" onClick={onRunBacktest} disabled={isRunningBacktest}>
               <Play size={13} />
               {isRunningBacktest ? t("panels.runningBacktest", "Running") : t("panels.runBacktest", "Run")}
             </button>
           )}
-          <button><Settings size={14} /></button>
-          <button><Maximize2 size={14} /></button>
+          <button type="button" onClick={onOpenStrategy} title={t("panels.configureStrategy", "Configure strategy")}>
+            <Settings size={14} />
+          </button>
+          <button
+            type="button"
+            className={isExpanded ? "active" : ""}
+            onClick={() => {
+              setIsExpanded((value) => !value);
+              onActionNotice(t("panels.expandChart", "Chart size"), isExpanded ? t("toast.chartCollapsed", "Chart returned to normal size") : t("toast.chartExpanded", "Chart expanded"));
+            }}
+            title={t("panels.expandChart", "Chart size")}
+          >
+            <Maximize2 size={14} />
+          </button>
         </div>
       </div>
+      {showIndicators ? (
+        <div className="indicator-strip">
+          <span>EMA 6/18</span>
+          <strong className="positive-text">Momentum +0.48</strong>
+          <span>Spread 0.03%</span>
+          <strong className="warn-text">Funding -0.23</strong>
+        </div>
+      ) : null}
       {tab === "Backtest" ? (
         <BacktestWorkspace t={t} result={backtest} runs={backtestRuns} status={backtestStatus} isRunning={isRunningBacktest} onRun={onRunBacktest} />
       ) : (
@@ -2993,7 +3220,7 @@ function ChartWorkspace({
         <MarketChart candles={candles} />
       </div>
       <div className="market-footer">
-        <span>{meta.selectedMarket} - 15 - {meta.dataSource}</span>
+        <span>{meta.selectedMarket} - {timeframe} - {meta.dataSource}</span>
         <span>O {numberFormat.format(lastCandle.open)} H {numberFormat.format(lastCandle.high)} L {numberFormat.format(lastCandle.low)} C {numberFormat.format(lastCandle.close)}</span>
         <strong>+{(lastCandle.close - lastCandle.open).toFixed(1)} (+0.35%)</strong>
       </div>
@@ -3364,13 +3591,33 @@ function BottomPanel({
   events,
   eventFilter,
   setEventFilter,
+  onNotify,
   meta,
 }) {
+  function exportVisibleEvents() {
+    const payload = {
+      product: "CCVar Quant Lab",
+      exportedAt: new Date().toISOString(),
+      filter: eventFilter,
+      events,
+    };
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ccvar-events-${eventFilter.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    onNotify(t("toast.eventsExported", "Visible events exported"), "success");
+  }
+
   return (
     <section className="bottom-panel panel">
       <nav className="bottom-tabs">
         {["Performance", "AI Steps", "Trades", "Positions", "Orders", "Metrics", "Risk"].map((tab) => (
-          <button key={tab} className={active === tab ? "active" : ""} onClick={() => setActive(tab)}>
+          <button key={tab} type="button" className={active === tab ? "active" : ""} onClick={() => setActive(tab)}>
             {choiceLabel(t, tab)}
             {tab === "AI Steps"
               ? ` (${autopilotSteps.length})`
@@ -3409,13 +3656,24 @@ function BottomPanel({
           <div className="log-header">
             <h2>{t("panels.eventLog", "Event Log")}</h2>
             <div className="icon-row">
-              <button><Settings size={14} /></button>
-              <button><Download size={14} /></button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActive("Risk");
+                  onNotify(t("toast.riskTabOpened", "Risk tab opened"), "info");
+                }}
+                title={t("panels.riskSettings", "Risk settings")}
+              >
+                <Settings size={14} />
+              </button>
+              <button type="button" onClick={exportVisibleEvents} title={t("panels.exportEvents", "Export events")}>
+                <Download size={14} />
+              </button>
             </div>
           </div>
           <div className="filter-row">
             {["All", "AI Decision", "Sim Fill", "Shadow", "Risk"].map((filter) => (
-              <button key={filter} className={eventFilter === filter ? "active" : ""} onClick={() => setEventFilter(filter)}>
+              <button key={filter} type="button" className={eventFilter === filter ? "active" : ""} onClick={() => setEventFilter(filter)}>
                 {choiceLabel(t, filter)}
               </button>
             ))}

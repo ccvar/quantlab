@@ -10,6 +10,8 @@
     "build": "vite build",
     "build:app": "npm run build && go build -o bin/ccvar-quant ./cmd/ccvar-quant",
     "package:desktop": "bash scripts/package-desktop.sh",
+    "package:native:macos": "bash scripts/package-native-macos.sh",
+    "package:native:windows": "pwsh -File scripts/package-native-windows.ps1",
     "smoke:local": "bash scripts/smoke-local.sh",
     "acceptance:env": "bash scripts/check-acceptance-env.sh",
     "acceptance:live": "bash scripts/acceptance-live.sh",
