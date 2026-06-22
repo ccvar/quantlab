@@ -1,0 +1,118 @@
+name: Real Sandbox Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-sandbox-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  real-sandbox-acceptance:
+    name: Binance and OKX Real Sandbox Acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install release tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file ripgrep unzip zip
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build local Web client
+        run: |
+          npm run build
+          go build -trimpath -buildvcs=false -o bin/ccvar-quant ./cmd/ccvar-quant
+
+      - name: Check sandbox secret readiness
+        env:
+          BINANCE_TESTNET_API_KEY: ${{ secrets.BINANCE_TESTNET_API_KEY }}
+          BINANCE_TESTNET_API_SECRET: ${{ secrets.BINANCE_TESTNET_API_SECRET }}
+          OKX_DEMO_API_KEY: ${{ secrets.OKX_DEMO_API_KEY }}
+          OKX_DEMO_API_SECRET: ${{ secrets.OKX_DEMO_API_SECRET }}
+          OKX_DEMO_API_PASSPHRASE: ${{ secrets.OKX_DEMO_API_PASSPHRASE }}
+        run: |
+          CCVAR_ACCEPTANCE_ENV_CHECK_EXCHANGES=Binance,OKX \
+          CCVAR_ACCEPTANCE_ENV_CHECK_REQUIRE_READY=true \
+          npm run acceptance:env
+
+      - name: Start local client
+        run: |
+          DB_PATH="${RUNNER_TEMP}/ccvar-real-sandbox.sqlite"
+          LOG_PATH="${RUNNER_TEMP}/ccvar-real-sandbox.log"
+          nohup ./bin/ccvar-quant --addr 127.0.0.1:8787 --db "$DB_PATH" > "$LOG_PATH" 2>&1 &
+          echo "$!" > "${RUNNER_TEMP}/ccvar-real-sandbox.pid"
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/api/health >/dev/null; then
+              echo "local client ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$LOG_PATH"
+          exit 1
+
+      - name: Run final audit with real sandbox acceptance
+        env:
+          CCVAR_FINAL_AUDIT_URL: http://127.0.0.1:8787
+          CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE: "true"
+          CCVAR_FINAL_AUDIT_REAL_EXCHANGES: Binance,OKX
+          CCVAR_ACCEPTANCE_BINANCE_ENVIRONMENT: testnet
+          CCVAR_ACCEPTANCE_OKX_ENVIRONMENT: demo
+          BINANCE_TESTNET_API_KEY: ${{ secrets.BINANCE_TESTNET_API_KEY }}
+          BINANCE_TESTNET_API_SECRET: ${{ secrets.BINANCE_TESTNET_API_SECRET }}
+          OKX_DEMO_API_KEY: ${{ secrets.OKX_DEMO_API_KEY }}
+          OKX_DEMO_API_SECRET: ${{ secrets.OKX_DEMO_API_SECRET }}
+          OKX_DEMO_API_PASSPHRASE: ${{ secrets.OKX_DEMO_API_PASSPHRASE }}
+        run: npm run audit:final
+
+      - name: Enforce final completion gate
+        run: npm run audit:complete
+
+      - name: Stop local client
+        if: always()
+        run: |
+          if [ -f "${RUNNER_TEMP}/ccvar-real-sandbox.pid" ]; then
+            kill "$(cat "${RUNNER_TEMP}/ccvar-real-sandbox.pid")" || true
+          fi
+
+      - name: Upload final audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-sandbox-final-audit
+          path: |
+            dist/final-audit/final-audit-latest.json
+            dist/final-audit/live-acceptance-binance.json
+            dist/final-audit/live-acceptance-okx.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload local client log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-sandbox-local-client-log
+          path: ${{ runner.temp }}/ccvar-real-sandbox.log
+          if-no-files-found: warn
+          retention-days: 14

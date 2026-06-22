@@ -179,6 +179,16 @@ CI 产物包含：
 - 校验文件：`SHA256SUMS.txt`
 - 机器可读 manifest：`release-manifest.json`
 
+仓库还包含 `.github/workflows/real-sandbox-acceptance.yml`，用于真实 Binance / OKX 沙盒最终门禁。先在 GitHub Repository Secrets 中配置：
+
+- `BINANCE_TESTNET_API_KEY`
+- `BINANCE_TESTNET_API_SECRET`
+- `OKX_DEMO_API_KEY`
+- `OKX_DEMO_API_SECRET`
+- `OKX_DEMO_API_PASSPHRASE`
+
+然后在 GitHub Actions 手动运行 `Real Sandbox Acceptance`。它会启动本地客户端到 `127.0.0.1:8787`，用两家真实沙盒 key 运行 `audit:final`，再执行 `npm run audit:complete`，并上传脱敏后的 final audit 和 live acceptance 报告。workflow 不会打印或上传 API key、secret、OKX passphrase、Vault passphrase、ciphertext、salt 或 nonce。
+
 交付前建议先跑完整发布验证：
 
 ```bash
@@ -208,7 +218,7 @@ CCVAR_FINAL_AUDIT_REAL_EXCHANGES=Binance,OKX \
 BINANCE_TESTNET_API_KEY=... \
 BINANCE_TESTNET_API_SECRET=... \
 OKX_DEMO_API_KEY=... \
-OKX_DEMO_SECRET=... \
+OKX_DEMO_API_SECRET=... \
 OKX_DEMO_API_PASSPHRASE=... \
 npm run audit:final
 ```

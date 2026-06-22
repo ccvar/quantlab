@@ -73,7 +73,7 @@ If the client is launched with `--open` while another CCVar Quant instance is al
 
 ## GitHub Actions
 
-The repository includes `.github/workflows/build-clients.yml`.
+The repository includes `.github/workflows/build-clients.yml` and `.github/workflows/real-sandbox-acceptance.yml`.
 
 It runs on push, pull request, and manual dispatch:
 
@@ -84,6 +84,16 @@ CI artifacts:
 
 - `ccvar-web-embedded-ui`: static assets under `cmd/ccvar-quant/web`.
 - `ccvar-desktop-release`: macOS arm64 zip, Windows amd64 zip, `SHA256SUMS.txt`, and `release-manifest.json`.
+
+Real sandbox completion is intentionally manual. Add these repository secrets, then run the `Real Sandbox Acceptance` workflow from GitHub Actions:
+
+- `BINANCE_TESTNET_API_KEY`
+- `BINANCE_TESTNET_API_SECRET`
+- `OKX_DEMO_API_KEY`
+- `OKX_DEMO_API_SECRET`
+- `OKX_DEMO_API_PASSPHRASE`
+
+That workflow starts the local client on `127.0.0.1:8787`, runs `audit:final` with `CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true`, enforces `npm run audit:complete`, and uploads sanitized final audit reports. It does not print or artifact API keys, API secrets, OKX passphrases, Vault passphrases, ciphertext, salt, or nonce.
 
 Cross-compile examples:
 
