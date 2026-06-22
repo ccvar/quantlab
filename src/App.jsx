@@ -1503,32 +1503,32 @@ export function App() {
   const activeRun = labState.runs[selectedRun] ?? labState.runs[0];
   const modeTone = mode === "Live" ? "danger" : mode === "Paper" ? "paper" : "shadow";
 
-  return (
-    <main className={classNames("app-shell", (isStopped || isRunStopped) && "is-stopped")}>
-      <TopBar
-        t={t}
-        meta={labState.meta}
-        mode={mode}
-        modeTone={modeTone}
-        setMode={handleModeChange}
-        dataSource={dataSource}
-        setDataSource={setDataSource}
-        isStopped={isStopped}
-        onToggleKillSwitch={handleKillSwitchToggle}
-        sourceStatus={sourceStatus}
-        credentialCount={credentials.length}
-        onOpenCredentials={openCredentialPanel}
-        strategyName={strategyProfile.name}
-        onOpenStrategy={() => setIsStrategyPanelOpen(true)}
-        liveGuard={liveGuard}
-        killSwitch={killSwitch}
-        onOpenLiveGuard={() => setIsLiveGuardOpen(true)}
-      />
-      {isCredentialPanelOpen || isStrategyPanelOpen || isLiveGuardOpen ? null : (
-        <LanguageSwitcher t={t} locale={locale} onChange={handleLocaleChange} />
-      )}
+  const isModalOpen = isCredentialPanelOpen || isStrategyPanelOpen || isLiveGuardOpen;
 
-      <section className="lab-grid">
+  return (
+    <>
+      <main className={classNames("app-shell", (isStopped || isRunStopped) && "is-stopped")}>
+        <TopBar
+          t={t}
+          meta={labState.meta}
+          mode={mode}
+          modeTone={modeTone}
+          setMode={handleModeChange}
+          dataSource={dataSource}
+          setDataSource={setDataSource}
+          isStopped={isStopped}
+          onToggleKillSwitch={handleKillSwitchToggle}
+          sourceStatus={sourceStatus}
+          credentialCount={credentials.length}
+          onOpenCredentials={openCredentialPanel}
+          strategyName={strategyProfile.name}
+          onOpenStrategy={() => setIsStrategyPanelOpen(true)}
+          liveGuard={liveGuard}
+          killSwitch={killSwitch}
+          onOpenLiveGuard={() => setIsLiveGuardOpen(true)}
+        />
+
+        <section className="lab-grid">
         <aside className="left-rail">
           <BrandBlock appInfo={appInfo} />
           <ExperimentRuns
@@ -1713,8 +1713,10 @@ export function App() {
         isSyncingAccount={isSyncingAccount}
         onNotify={notifyBlocked}
       />
-      <ToastMessage toast={toast} onClose={() => setToast(null)} />
-    </main>
+        <ToastMessage toast={toast} onClose={() => setToast(null)} />
+      </main>
+      {isModalOpen ? null : <LanguageSwitcher t={t} locale={locale} onChange={handleLocaleChange} />}
+    </>
   );
 }
 
