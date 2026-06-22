@@ -94,7 +94,7 @@ button {
 .top-bar {
   height: 72px;
   display: grid;
-  grid-template-columns: 145px 180px 172px minmax(110px, 1fr) 104px 145px 164px 126px 118px 146px;
+  grid-template-columns: 145px 180px 172px minmax(110px, 1fr) 145px 164px 126px 118px 146px;
   align-items: stretch;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(14, 30, 37, 0.96), rgba(9, 18, 23, 0.96));
@@ -210,15 +210,6 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.language-section .segmented {
-  grid-auto-columns: minmax(0, 1fr);
-}
-
-.language-section .segmented button {
-  font-family: "IBM Plex Sans", sans-serif;
-  font-weight: 700;
 }
 
 .model-pill i,
@@ -373,6 +364,43 @@ button {
   color: var(--teal);
 }
 
+.global-language-switcher {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 65;
+  width: min(246px, calc(100vw - 28px));
+  min-height: 46px;
+  border: 1px solid rgba(33, 212, 196, 0.36);
+  border-radius: 8px;
+  background: rgba(8, 18, 23, 0.96);
+  box-shadow: var(--shadow);
+  display: grid;
+  grid-template-columns: auto minmax(126px, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 10px;
+}
+
+.global-language-switcher > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.global-language-switcher .segmented {
+  height: 30px;
+  background: rgba(2, 10, 13, 0.74);
+}
+
+.global-language-switcher .segmented button {
+  font-weight: 700;
+}
+
 .lab-grid {
   height: calc(100vh - 72px);
   min-height: 828px;
@@ -481,6 +509,20 @@ button {
   color: var(--text);
   border-color: var(--line);
   background: rgba(255, 255, 255, 0.03);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(33, 212, 196, 0.5);
+  outline-offset: 2px;
+}
+
+button.blocked-action:not(:disabled) {
+  border-color: rgba(244, 184, 75, 0.48);
+  color: #f7cf83;
+  background: rgba(244, 184, 75, 0.1);
+  cursor: help;
 }
 
 .runs-panel {
@@ -1940,16 +1982,19 @@ input[type="range"] {
   position: fixed;
   inset: 0;
   z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+  overflow: auto;
   background: rgba(1, 6, 8, 0.68);
   backdrop-filter: blur(8px);
 }
 
 .credential-modal {
   width: min(780px, calc(100vw - 40px));
-  max-height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 36px);
+  margin: auto 0;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(14, 30, 37, 0.98), rgba(7, 15, 19, 0.98));
@@ -1960,6 +2005,7 @@ input[type="range"] {
 }
 
 .credential-modal-header {
+  flex: 0 0 auto;
   height: 58px;
   display: flex;
   align-items: center;
@@ -2001,6 +2047,7 @@ input[type="range"] {
 }
 
 .credential-modal-grid {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   display: grid;
@@ -2014,6 +2061,7 @@ input[type="range"] {
 }
 
 .strategy-profile-body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   background: rgba(7, 16, 20, 0.96);
@@ -2053,6 +2101,7 @@ input[type="range"] {
 
 .credential-form,
 .credential-list {
+  min-height: 0;
   min-width: 0;
   background: rgba(7, 16, 20, 0.96);
   padding: 14px 14px max(18px, env(safe-area-inset-bottom));
@@ -2357,6 +2406,7 @@ input[type="range"] {
 }
 
 .live-guard-grid {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   display: grid;
@@ -3244,7 +3294,7 @@ input[type="range"] {
 
 @media (max-width: 1280px) {
   .top-bar {
-    grid-template-columns: 136px 168px 152px minmax(90px, 1fr) 96px 134px 150px 112px 110px 128px;
+    grid-template-columns: 136px 168px 152px minmax(90px, 1fr) 134px 150px 112px 110px 128px;
   }
 
   .lab-grid {
@@ -3393,7 +3443,30 @@ input[type="range"] {
   }
 }
 
+@media (max-height: 720px) {
+  .modal-backdrop {
+    align-items: flex-start;
+    padding: 8px;
+  }
+
+  .credential-modal {
+    margin: 0;
+    max-height: calc(100dvh - 16px);
+  }
+}
+
 @media (max-width: 760px) {
+  .global-language-switcher {
+    right: 8px;
+    bottom: 8px;
+    width: min(246px, calc(100vw - 16px));
+  }
+
+  .modal-backdrop {
+    align-items: flex-start;
+    padding: 6px;
+  }
+
   .top-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

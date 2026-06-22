@@ -636,6 +636,10 @@ export function App() {
     notify(resolved === "zh-CN" ? t("toast.switchedChinese", "Switched to Chinese") : t("toast.switchedEnglish", "Switched to English"), "success");
   }
 
+  function notifyBlocked(message) {
+    notify(message || t("toast.actionUnavailable", "Action is not ready yet"), "warn");
+  }
+
   function handleTimeframeChange(nextTimeframe) {
     setTimeframe(nextTimeframe);
     notify(t("toast.timeframeChanged", "Timeframe switched to {value}", { value: nextTimeframe }), "success");
@@ -669,6 +673,10 @@ export function App() {
   }
 
   async function handleSimStep() {
+    if (isStopped || isRunStopped) {
+      notifyBlocked(t("toast.resumeBeforeAiStep", "Resume the run before starting an AI step"));
+      return;
+    }
     setIsSimulating(true);
     try {
       const result = await simulateStep({
@@ -1175,6 +1183,11 @@ export function App() {
 
   async function handlePruneLocalData() {
     if (isPruningLocalData) return;
+    if (localDataPhrase !== "PRUNE LOCAL DATA") {
+      setLocalDataStatus({ tone: "warn", message: "Phrase required" });
+      notifyBlocked(t("toast.prunePhraseRequired", "Type PRUNE LOCAL DATA before pruning local research data"));
+      return;
+    }
     setIsPruningLocalData(true);
     setLocalDataStatus({ tone: "loading", message: "Pruning" });
     try {
@@ -1237,6 +1250,15 @@ export function App() {
 
   async function handleAutopilotToggle() {
     const shouldStop = Boolean(autopilot?.running);
+    if (!shouldStop && isStopped) {
+      notifyBlocked(t("toast.killSwitchBlocksAuto", "Resume the Kill Switch before starting Autopilot"));
+      return;
+    }
+    if (!shouldStop && mode === "Live" && !(liveGuard?.unlocked && liveExecutionForm.credentialId && liveExecutionForm.passphrase)) {
+      setIsLiveGuardOpen(true);
+      notifyBlocked(t("toast.liveSetupRequired", "Complete Live Setup before starting Live Autopilot"));
+      return;
+    }
     setIsUpdatingAutopilot(true);
     try {
       if (shouldStop) {
@@ -1392,6 +1414,16 @@ export function App() {
   }
 
   async function handleAccountSync() {
+    if (!liveExecutionForm.credentialId) {
+      setAccountSyncStatus({ tone: "warn", message: "Select key" });
+      notifyBlocked(t("toast.selectKey", "Select a saved key first"));
+      return;
+    }
+    if (!liveExecutionForm.passphrase) {
+      setAccountSyncStatus({ tone: "warn", message: "Passphrase required" });
+      notifyBlocked(t("toast.passphraseRequired", "Passphrase required"));
+      return;
+    }
     setIsSyncingAccount(true);
     setAccountSyncStatus({ tone: "loading", message: "Syncing" });
     try {
@@ -1475,8 +1507,6 @@ export function App() {
     <main className={classNames("app-shell", (isStopped || isRunStopped) && "is-stopped")}>
       <TopBar
         t={t}
-        locale={locale}
-        setLocale={handleLocaleChange}
         meta={labState.meta}
         mode={mode}
         modeTone={modeTone}
@@ -1494,6 +1524,9 @@ export function App() {
         killSwitch={killSwitch}
         onOpenLiveGuard={() => setIsLiveGuardOpen(true)}
       />
+      {isCredentialPanelOpen || isStrategyPanelOpen || isLiveGuardOpen ? null : (
+        <LanguageSwitcher t={t} locale={locale} onChange={handleLocaleChange} />
+      )}
 
       <section className="lab-grid">
         <aside className="left-rail">
@@ -1678,6 +1711,7 @@ export function App() {
         isUpdating={isUpdatingLiveGuard}
         isExecuting={isExecutingLive}
         isSyncingAccount={isSyncingAccount}
+        onNotify={notifyBlocked}
       />
       <ToastMessage toast={toast} onClose={() => setToast(null)} />
     </main>
@@ -1693,6 +1727,23 @@ function ToastMessage({ toast, onClose }) {
         <X size={14} />
       </button>
     </div>
+  );
+}
+
+function LanguageSwitcher({ t, locale, onChange }) {
+  return (
+    <aside className="global-language-switcher" aria-label={t("top.languageSwitch", "Language switch")}>
+      <span>
+        <Languages size={14} />
+        {t("top.languageSwitch", "Language")}
+      </span>
+      <Segmented
+        value={locale}
+        values={["zh-CN", "en-US"]}
+        onChange={(value) => onChange(resolveLocale(value))}
+        labelFor={(item) => (item === "zh-CN" ? t("top.languageChinese", "中文") : "English")}
+      />
+    </aside>
   );
 }
 
@@ -1942,7 +1993,8 @@ function CredentialPanel({
                 className="vault-test-button"
                 type="button"
                 onClick={onTest}
-                disabled={isTesting || !testForm.credentialId || !testForm.passphrase}
+                disabled={isTesting}
+                title={!testForm.credentialId ? t("toast.selectKey", "Select a saved key first") : !testForm.passphrase ? t("toast.passphraseRequired", "Passphrase required") : t("vault.testReadOnly", "TEST READ-ONLY CONNECTION")}
               >
                 <RotateCcw size={14} />
                 {isTesting ? t("vault.testing", "TESTING") : t("vault.testReadOnly", "TEST READ-ONLY CONNECTION")}
@@ -2123,6 +2175,7 @@ function LiveGuardPanel({
   isUpdating,
   isExecuting,
   isSyncingAccount,
+  onNotify,
 }) {
   useEscapeToClose(open, onClose);
   if (!open) return null;
@@ -2241,6 +2294,38 @@ function LiveGuardPanel({
           : hasBlockingPreflight
             ? t("common.blocked", "blocked")
             : "";
+  const accountSyncDisabledReason = !executionForm.credentialId
+    ? t("toast.selectKey", "Select a saved key first")
+    : !executionForm.passphrase
+      ? t("toast.passphraseRequired", "Passphrase required")
+      : "";
+  const pruneDisabledReason = localDataPhrase === "PRUNE LOCAL DATA"
+    ? ""
+    : t("toast.prunePhraseRequired", "Type PRUNE LOCAL DATA before pruning local research data");
+  const handleExecuteClick = () => {
+    if (isExecuting) return;
+    if (!canExecuteLive) {
+      onNotify(executeDisabledReason || t("toast.liveSetupRequired", "Complete Live Setup before starting Live Autopilot"));
+      return;
+    }
+    onExecute();
+  };
+  const handleAccountSyncClick = () => {
+    if (isSyncingAccount) return;
+    if (accountSyncDisabledReason) {
+      onNotify(accountSyncDisabledReason);
+      return;
+    }
+    onSyncAccount();
+  };
+  const handlePruneClick = () => {
+    if (isPruningLocalData) return;
+    if (pruneDisabledReason) {
+      onNotify(pruneDisabledReason);
+      return;
+    }
+    onPruneLocalData();
+  };
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -2549,10 +2634,10 @@ function LiveGuardPanel({
             </label>
 
             <button
-              className="save-credential execute-live"
+              className={classNames("save-credential execute-live", !canExecuteLive && "blocked-action")}
               type="button"
-              disabled={isExecuting || !canExecuteLive}
-              onClick={onExecute}
+              disabled={isExecuting}
+              onClick={handleExecuteClick}
               title={!canExecuteLive ? executeDisabledReason : t("guard.runAiExecute", "RUN AI EXECUTE")}
             >
               <Zap size={14} />
@@ -2573,10 +2658,11 @@ function LiveGuardPanel({
               <span className={classNames("vault-status", accountSyncStatus.tone)}>{statusText(t, accountSyncStatus.message)}</span>
             </div>
             <button
-              className="sync-account"
+              className={classNames("sync-account", accountSyncDisabledReason && "blocked-action")}
               type="button"
-              disabled={isSyncingAccount || !executionForm.credentialId || !executionForm.passphrase}
-              onClick={onSyncAccount}
+              disabled={isSyncingAccount}
+              onClick={handleAccountSyncClick}
+              title={accountSyncDisabledReason || t("guard.syncBalanceOrders", "SYNC BALANCE / ORDERS")}
             >
               <RotateCcw size={14} />
               {isSyncingAccount ? t("guard.syncing", "SYNCING") : t("guard.syncBalanceOrders", "SYNC BALANCE / ORDERS")}
@@ -2662,9 +2748,11 @@ function LiveGuardPanel({
                   autoComplete="off"
                 />
                 <button
+                  className={classNames(pruneDisabledReason && "blocked-action")}
                   type="button"
-                  onClick={onPruneLocalData}
-                  disabled={isPruningLocalData || localDataPhrase !== "PRUNE LOCAL DATA"}
+                  onClick={handlePruneClick}
+                  disabled={isPruningLocalData}
+                  title={pruneDisabledReason || t("guard.prune", "Prune")}
                 >
                   <AlertTriangle size={11} />
                   {isPruningLocalData ? t("guard.pruning", "Pruning") : t("guard.prune", "Prune")}
@@ -2692,10 +2780,16 @@ function LiveGuardPanel({
                       <div className="ledger-row-actions">
                         <code>#{record.id}</code>
                         <button
-                          className="ledger-reconcile"
+                          className={classNames("ledger-reconcile", !canReconcile(record) && "blocked-action")}
                           type="button"
-                          disabled={Boolean(reconcilingId) || !canReconcile(record)}
-                          onClick={() => onReconcile(record)}
+                          disabled={Boolean(reconcilingId)}
+                          onClick={() => {
+                            if (!canReconcile(record)) {
+                              onNotify(t("toast.reconcileNeedsPassphrase", "Load the vault passphrase and use a submitted demo order before reconciliation"));
+                              return;
+                            }
+                            onReconcile(record);
+                          }}
                           title={t("guard.reconcileOrder", "Reconcile order")}
                         >
                           <RotateCcw size={10} />
@@ -2755,8 +2849,6 @@ function BrandBlock({ appInfo }) {
 
 function TopBar({
   t,
-  locale,
-  setLocale,
   meta,
   mode,
   modeTone,
@@ -2818,17 +2910,6 @@ function TopBar({
           <span>{meta.model}</span>
           <i />
         </div>
-      </div>
-
-      <div className="top-section language-section">
-        <span className="label">{t("top.language", "Language")}</span>
-        <Segmented
-          value={locale}
-          values={["zh-CN", "en-US"]}
-          onChange={(value) => setLocale(resolveLocale(value))}
-          icon={<Languages size={14} />}
-          labelFor={(item) => (item === "zh-CN" ? t("top.languageChinese", "中文") : "English")}
-        />
       </div>
 
       <MetricTile label={t("top.simCapital", "Sim Capital")} value={`${formatMoney(meta.simCapital)} USDT`} />
@@ -2971,7 +3052,7 @@ function SimulationControls({
 }) {
   const autoMode = autopilot?.running ? autopilot.mode : mode === "Live" ? "live" : mode === "Paper" ? "paper" : "shadow";
   const autoTone = autopilot?.running ? "success" : autopilot?.lastStatus === "failed" ? "danger" : "warn";
-  const autoDisabled = isUpdatingAutopilot || (!autopilot?.running && (stopLocked || (mode === "Live" && !liveReady)));
+  const autoBlocked = !autopilot?.running && (stopLocked || (mode === "Live" && !liveReady));
   const autoDisabledReason = stopLocked
     ? t("panels.killActive", "KILL ACTIVE")
     : mode === "Live" && !liveReady
@@ -3029,7 +3110,18 @@ function SimulationControls({
           {isPaused ? <Play size={15} /> : <Pause size={15} />}
           {isPaused ? t("panels.resume", "RESUME") : t("panels.pause", "PAUSE")}
         </button>
-        <button className="danger-btn" type="button" onClick={() => setIsStopped((value) => !value)} disabled={stopLocked}>
+        <button
+          className={classNames("danger-btn", stopLocked && "blocked-action")}
+          type="button"
+          onClick={() => {
+            if (stopLocked) {
+              onActionNotice(t("panels.killActive", "KILL ACTIVE"), t("toast.killSwitchControlsLocked", "Resume the Kill Switch before changing the run state"));
+              return;
+            }
+            setIsStopped((value) => !value);
+          }}
+          title={stopLocked ? t("toast.killSwitchControlsLocked", "Resume the Kill Switch before changing the run state") : ""}
+        >
           <Square size={14} />
           {stopLocked ? t("panels.killActive", "KILL ACTIVE") : isStopped ? t("panels.resumeRun", "RESUME RUN") : t("panels.stopRun", "STOP RUN")}
         </button>
@@ -3037,7 +3129,7 @@ function SimulationControls({
           <RotateCcw size={14} />
           {t("panels.restart", "RESTART")}
         </button>
-        <button type="button" onClick={onSimStep} disabled={isSimulating || isStopped}>
+        <button className={classNames(isStopped && "blocked-action")} type="button" onClick={onSimStep} disabled={isSimulating} title={isStopped ? t("toast.resumeBeforeAiStep", "Resume the run before starting an AI step") : ""}>
           <Plus size={14} />
           {isSimulating ? t("panels.running", "RUNNING") : t("panels.aiStep", "AI STEP")}
         </button>
@@ -3060,7 +3152,7 @@ function SimulationControls({
           <span>{t("panels.next", "Next")}</span>
           <code>{autopilot?.nextRunAt ? formatClock(autopilot.nextRunAt) : latestAutoRun?.status || "-"}</code>
         </div>
-        <button className="autopilot-toggle" type="button" onClick={onToggleAutopilot} disabled={autoDisabled} title={autoDisabledReason}>
+        <button className={classNames("autopilot-toggle", autoBlocked && "blocked-action")} type="button" onClick={onToggleAutopilot} disabled={isUpdatingAutopilot} title={autoDisabledReason}>
           {autopilot?.running ? <Square size={13} /> : <Play size={13} />}
           {isUpdatingAutopilot ? t("panels.updating", "UPDATING") : autopilot?.running ? t("panels.stopAuto", "STOP AUTO") : t("panels.startAuto", "START AUTO")}
         </button>
@@ -3872,7 +3964,7 @@ function PaperLedgerView({ t, account, rows, resetStatus, isResetting, isResetDi
       </div>
       <div className="paper-ledger-toolbar">
         <span className={resetStatus?.tone ? `${resetStatus.tone}-text` : ""}>{statusText(t, resetStatus?.message || "Ready")}</span>
-        <button type="button" onClick={onReset} disabled={isResetting || isResetDisabled} title={t("panels.resetTitle", "Type RESET PAPER to confirm")}>
+        <button className={classNames(isResetDisabled && "blocked-action")} type="button" onClick={onReset} disabled={isResetting} title={isResetDisabled ? t("toast.stopAiFirst", "Stop AI before resetting paper ledger") : t("panels.resetTitle", "Type RESET PAPER to confirm")}>
           <Trash2 size={12} />
           {isResetting ? t("panels.resetting", "RESETTING") : t("panels.reset", "RESET")}
         </button>

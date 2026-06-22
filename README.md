@@ -16,6 +16,17 @@ CCVar Quant Lab is built around a safe progression: AI simulation, shadow/paper 
 - Bilingual UI with Simplified Chinese and English language switching.
 - Final audit scripts that block completion until both Binance and OKX real sandbox acceptance reports pass.
 
+## Downloads
+
+End-user packages are published under [GitHub Releases](https://github.com/ccvar/quantlab/releases). For each release:
+
+- Download `ccvar-quant-lab-macos-native.zip` for the standalone macOS client. It contains `CCVar Quant Lab.app` and `CCVar Quant Lab Web.app`.
+- Download `ccvar-quant-lab-windows-native.zip` for the standalone Windows client. It contains `CCVar Quant Lab.exe` and `Start CCVar Quant Lab Web.cmd`.
+- Use the `*-browser-launcher` style portable packages (`ccvar-quant-lab-macos-arm64.zip`, `ccvar-quant-lab-windows-amd64.zip`) when you specifically want the launcher that opens the Web UI in a browser.
+- Verify downloads with the matching `SHA256SUMS.*.txt` files and `release-manifest.json`.
+
+中文下载说明：普通用户优先下载 `macos-native` 或 `windows-native` 包，这是完整客户端；浏览器启动包只用于你希望启动本地服务后自动打开浏览器的场景。
+
 ## Stack
 
 - Go local API
@@ -34,7 +45,7 @@ The UI language files live under `src/i18n/`, one module per locale:
 - `src/i18n/en-US.js`
 - `src/i18n/index.js`
 
-The language switcher is in the top bar and persists the selected locale in `localStorage` as `ccvar.locale`. The same embedded UI is used by the Web server, macOS native app, Windows native app, and browser launchers, so all delivery targets share the same i18n resources.
+The language switcher is the floating `Language / 语言` control in the lower-right corner and persists the selected locale in `localStorage` as `ccvar.locale`. The same embedded UI is used by the Web server, macOS native app, Windows native app, and browser launchers, so all delivery targets share the same i18n resources.
 
 When adding new UI copy, add the key to both locale files and call the translator through `t("path.to.key", "English fallback")`. Keep protocol values, exchange names, symbols, environment names, and audit/model output as raw data unless they are purely UI chrome.
 
@@ -76,7 +87,7 @@ If the client is launched with `--open` while another CCVar Quant instance is al
 
 ## GitHub Actions
 
-The repository includes `.github/workflows/build-clients.yml`, `.github/workflows/native-desktop-clients.yml`, and `.github/workflows/real-sandbox-acceptance.yml`.
+The repository includes `.github/workflows/build-clients.yml`, `.github/workflows/native-desktop-clients.yml`, `.github/workflows/publish-release.yml`, and `.github/workflows/real-sandbox-acceptance.yml`.
 
 It runs on push, pull request, and manual dispatch:
 
@@ -84,6 +95,7 @@ It runs on push, pull request, and manual dispatch:
 - `Package macOS and Windows Clients`: runs `npm run verify:release`, which rebuilds and verifies deterministic macOS/Windows browser-launcher desktop packages, then uploads `ccvar-desktop-release`.
 - `Native macOS Client`: builds the standalone AppKit/WKWebView client and the macOS browser-launcher app on a macOS runner, then uploads `ccvar-native-macos`.
 - `Native Windows Client`: builds the standalone WinForms/WebView2 client and the Windows browser-launcher command on a Windows runner, then uploads `ccvar-native-windows`.
+- `Publish Release`: runs on `v*` tags or manual dispatch, builds browser-launcher and native packages, then creates or updates a GitHub Release with downloadable zip files and checksums.
 
 CI artifacts:
 
