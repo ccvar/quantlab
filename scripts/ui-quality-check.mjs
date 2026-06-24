@@ -37,6 +37,8 @@ const nativeScrollTargets = [
   ".paper-reset-body",
   ".live-guard-grid",
   ".live-guard-grid > section",
+  ".verdict-panel",
+  ".audit-rows",
   ".workspace-tabs",
   ".bottom-tabs",
 ].join(",");
@@ -140,39 +142,73 @@ function scrollbarTooLarge(entry, maxPx) {
   return (width !== null && width > maxPx) || (height !== null && height > maxPx);
 }
 
-async function assertHoverScrollbars(page, label) {
+async function assertNativeScrollbars(page, label) {
   const selector = nativeScrollTargets;
   const targetIndexes = await page.evaluate((candidateSelector) => {
-    return Array.from(document.querySelectorAll(candidateSelector)).map((element, index) => (
-      element.scrollHeight > element.clientHeight + 2 || element.scrollWidth > element.clientWidth + 2
-        ? index
-        : -1
-    )).filter((index) => index >= 0);
+    return Array.from(document.querySelectorAll(candidateSelector)).map((element, index) => {
+      const hasY = element.scrollHeight > element.clientHeight + 2;
+      const hasX = element.scrollWidth > element.clientWidth + 2;
+      return hasY || hasX ? index : -1;
+    }).filter((index) => index >= 0);
   }, selector);
   if (targetIndexes.length === 0) return null;
 
   const reports = [];
   for (const targetIndex of targetIndexes) {
     const target = page.locator(selector).nth(targetIndex);
-    await target.hover({ force: true });
-    await page.waitForTimeout(40);
-    reports.push(await target.evaluate((element) => {
+    const beforeHover = await target.evaluate((element) => {
       const styles = getComputedStyle(element, "::-webkit-scrollbar");
-      const rect = element.getBoundingClientRect();
       return {
-        className: String(element.className || element.tagName),
         width: styles.width,
         height: styles.height,
+      };
+    });
+    await target.hover({ force: true });
+    await page.waitForTimeout(40);
+    reports.push(await target.evaluate((element, beforeHover) => {
+      const styles = getComputedStyle(element, "::-webkit-scrollbar");
+      const rect = element.getBoundingClientRect();
+      const hasX = element.scrollWidth > element.clientWidth + 2;
+      const hasY = element.scrollHeight > element.clientHeight + 2;
+      const originalLeft = element.scrollLeft;
+      const originalTop = element.scrollTop;
+      if (hasX) element.scrollLeft = Math.min(12, element.scrollWidth - element.clientWidth);
+      if (hasY) element.scrollTop = Math.min(12, element.scrollHeight - element.clientHeight);
+      const movedX = !hasX || element.scrollLeft > originalLeft;
+      const movedY = !hasY || element.scrollTop > originalTop;
+      element.scrollLeft = originalLeft;
+      element.scrollTop = originalTop;
+      return {
+        className: String(element.className || element.tagName),
+        defaultWidth: beforeHover.width,
+        defaultHeight: beforeHover.height,
+        hoverWidth: styles.width,
+        hoverHeight: styles.height,
+        hasX,
+        hasY,
+        movedX,
+        movedY,
         rect: { width: Math.round(rect.width), height: Math.round(rect.height) },
         scrollWidth: element.scrollWidth,
         clientWidth: element.clientWidth,
         scrollHeight: element.scrollHeight,
         clientHeight: element.clientHeight,
       };
-    }));
+    }, beforeHover));
   }
-  const oversized = reports.filter((entry) => scrollbarTooLarge(entry, 2.5));
-  assert(oversized.length === 0, `${label} has hover/focus scrollbars wider than 2px`, oversized);
+  const missingOrStatic = reports.filter((entry) => {
+    const defaultWidth = numericCssPx(entry.defaultWidth);
+    const defaultHeight = numericCssPx(entry.defaultHeight);
+    const defaultXVisible = !entry.hasX || (defaultHeight !== null && defaultHeight > 0);
+    const defaultYVisible = !entry.hasY || (defaultWidth !== null && defaultWidth > 0);
+    return !defaultXVisible || !defaultYVisible || !entry.movedX || !entry.movedY;
+  });
+  const oversized = reports.filter((entry) => (
+    scrollbarTooLarge({ width: entry.defaultWidth, height: entry.defaultHeight }, 4.5) ||
+    scrollbarTooLarge({ width: entry.hoverWidth, height: entry.hoverHeight }, 5.5)
+  ));
+  assert(missingOrStatic.length === 0, `${label} has scrollable areas without visible working scrollbars`, missingOrStatic);
+  assert(oversized.length === 0, `${label} has scrollbars thicker than the compact native style`, oversized);
   await page.mouse.move(1, 1);
   await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
   await page.waitForTimeout(40);
@@ -1133,9 +1169,17 @@ async function assertEventLogFits(page, label) {
       const logRect = log.getBoundingClientRect();
       const tableRect = table?.getBoundingClientRect();
       const styles = getComputedStyle(log);
+      const originalLeft = log.scrollLeft;
+      const canScrollX = log.scrollWidth > log.clientWidth + 2;
+      if (canScrollX) log.scrollLeft = Math.min(18, log.scrollWidth - log.clientWidth);
+      const movedX = !canScrollX || log.scrollLeft > originalLeft;
+      log.scrollLeft = originalLeft;
       return {
         className: String(log.className || ""),
         visible: styles.display !== "none" && styles.visibility !== "hidden" && logRect.width > 1 && logRect.height > 1,
+        overflowX: styles.overflowX,
+        canScrollX,
+        movedX,
         log: {
           left: Math.round(logRect.left),
           right: Math.round(logRect.right),
@@ -1153,8 +1197,12 @@ async function assertEventLogFits(page, label) {
       };
     }).filter((entry) => entry.visible);
   });
-  const clipped = report.filter((entry) => entry.table && entry.overflowRight > 2);
-  assert(clipped.length === 0, `${label} event log table is clipped horizontally`, clipped);
+  const clipped = report.filter((entry) => (
+    entry.table &&
+    entry.overflowRight > 2 &&
+    (!entry.canScrollX || !["auto", "scroll"].includes(entry.overflowX) || !entry.movedX)
+  ));
+  assert(clipped.length === 0, `${label} event log table overflow is not handled by its scroll container`, clipped);
   return report;
 }
 
@@ -1484,7 +1532,7 @@ async function assertBottomTableHorizontalScroll(page, label, viewportName) {
     assert(!report.missing, `${label} is missing the ${target.name} wide table frame`, report);
     assert(report.hasOverflow, `${label} ${target.name} table does not expose horizontal overflow for the scroll affordance`, report);
     assert(report.railVisible, `${label} ${target.name} table horizontal rail is not visible/clickable`, report);
-    assert(report.trackHeight <= 2.5 && report.thumbHeight <= 2.5, `${label} ${target.name} table custom rail is thicker than the unified scrollbar style`, report);
+    assert(report.trackHeight <= 4.5 && report.thumbHeight <= 4.5, `${label} ${target.name} table custom rail is thicker than the unified scrollbar style`, report);
     assert(report.railOverlaysScroller, `${label} ${target.name} table horizontal rail is reserving a second scrollbar row`, report);
     assert(report.railCount === 1, `${label} ${target.name} table has duplicate horizontal rails`, report);
     assert(report.frameClassName.split(/\s+/).includes("has-right-overflow"), `${label} ${target.name} table does not hint at hidden right-side columns`, report);
@@ -2478,9 +2526,7 @@ async function main() {
             assert(!layout.hasPageX, `${label} has document-level horizontal overflow`, layout);
             assert(layout.uncontainedOverflow.length === 0, `${label} has uncontained horizontal overflow`, layout.uncontainedOverflow);
 
-            const visibleDefaultScrollbars = layout.scrollbars.filter((entry) => scrollbarTooLarge(entry, 1));
-            assert(visibleDefaultScrollbars.length === 0, `${label} has visible default scrollbars`, visibleDefaultScrollbars);
-            const hoverScrollbar = await assertHoverScrollbars(page, label);
+            const nativeScrollbar = await assertNativeScrollbars(page, label);
 
             const controls = await assertControls(page, `${label} main screen`);
             const numberInputChrome = await assertNumberInputChrome(page, `${label} main screen`);
@@ -2535,7 +2581,7 @@ async function main() {
                   samples: layout.containedOverflow,
                 },
               },
-              hoverScrollbar,
+              nativeScrollbar,
               numberInputChrome,
               stateTextContrast,
               primaryHitTargets,

@@ -25,8 +25,8 @@
   --amber-soft: rgba(244, 184, 75, 0.16);
   --blue: #58a6ff;
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
-  --scroll-size: 0px;
-  --scroll-reveal-size: 2px;
+  --scroll-size: 3px;
+  --scroll-reveal-size: 4px;
   --scroll-thumb: rgba(135, 154, 164, 0.36);
   --scroll-thumb-hover: rgba(33, 212, 196, 0.62);
   --scroll-track: transparent;
@@ -2478,7 +2478,8 @@ input[type="range"] {
 .verdict-panel {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .model-dot {
@@ -2925,7 +2926,7 @@ input[type="range"] {
   border-top: 0;
   background: transparent;
   cursor: pointer;
-  opacity: 0;
+  opacity: 1;
   outline: none;
   touch-action: none;
   transition: opacity 0.16s ease, background 0.16s ease;
@@ -3339,6 +3340,7 @@ input[type="range"] {
 .autopilot-steps-table {
   table-layout: fixed;
   font-size: 11px;
+  min-width: 680px;
 }
 
 .autopilot-steps-table th,
@@ -3386,15 +3388,13 @@ input[type="range"] {
 
 .event-log {
   height: calc(100% - 67px);
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: auto;
   overscroll-behavior: contain;
 }
 
 .event-log .data-table {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+  width: max(100%, 620px);
+  min-width: 620px;
   table-layout: fixed;
 }
 
@@ -3439,9 +3439,8 @@ input[type="range"] {
 }
 
 .compact-log .data-table {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+  width: max(100%, 430px);
+  min-width: 430px;
   table-layout: fixed;
 }
 
@@ -5434,7 +5433,8 @@ input[type="range"] {
   display: grid;
   gap: 7px;
   max-height: 220px;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .audit-row {
