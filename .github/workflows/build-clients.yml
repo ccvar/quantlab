@@ -38,6 +38,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
       - name: Build embedded Web UI
         run: npm run build
 
@@ -46,6 +49,24 @@ jobs:
 
       - name: Build local Web client binary
         run: go build -trimpath -buildvcs=false -o bin/ccvar-quant ./cmd/ccvar-quant
+
+      - name: Run local smoke and UI quality checks
+        run: |
+          ./bin/ccvar-quant --addr 127.0.0.1:8788 --db data/ci-ui-quality.db &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8788/api/health >/dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          curl -fsS http://127.0.0.1:8788/api/health >/dev/null
+          CCVAR_SMOKE_URL=http://127.0.0.1:8788 npm run smoke:local
+          CCVAR_UI_QUALITY_URL=http://127.0.0.1:8788 npm run ui:quality
 
       - name: Upload embedded Web UI
         uses: actions/upload-artifact@v4

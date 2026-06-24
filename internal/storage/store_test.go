@@ -601,7 +601,7 @@ func TestStrategyProfileDefaultsAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StrategyProfile() default error = %v", err)
 	}
-	if profile.Name != "AI Momentum Pro" || profile.Exchange != "Binance" || profile.Symbol != "BTCUSDT" || profile.OrderSizeUSDT != 500 {
+	if profile.Name != "AI Momentum Pro" || profile.Exchange != "Binance" || profile.Symbol != "BTCUSDT" || profile.ModelProfile != "local_policy" || profile.Concurrency != 2 || profile.OrderSizeUSDT != 500 {
 		t.Fatalf("default profile = %#v", profile)
 	}
 
@@ -610,6 +610,9 @@ func TestStrategyProfileDefaultsAndRoundTrip(t *testing.T) {
 		Exchange:        "OKX",
 		Symbol:          "eth-usdt",
 		Side:            "sell",
+		ModelProfile:    "claude_cli",
+		ModelFallback:   "local_policy",
+		Concurrency:     12,
 		OrderSizeUSDT:   250,
 		IntervalSeconds: 1,
 		MaxSteps:        4,
@@ -618,7 +621,7 @@ func TestStrategyProfileDefaultsAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveStrategyProfile() error = %v", err)
 	}
-	if saved.ID != 1 || saved.Symbol != "ETH-USDT" || saved.IntervalSeconds != 5 {
+	if saved.ID != 1 || saved.Symbol != "ETH-USDT" || saved.ModelProfile != "claude_cli" || saved.ModelFallback != "local_policy" || saved.Concurrency != 8 || saved.IntervalSeconds != 5 {
 		t.Fatalf("saved profile = %#v", saved)
 	}
 
@@ -626,7 +629,7 @@ func TestStrategyProfileDefaultsAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StrategyProfile() loaded error = %v", err)
 	}
-	if loaded.Name != "Mean Reversion" || loaded.Exchange != "OKX" || loaded.Side != "sell" || loaded.MaxSteps != 4 {
+	if loaded.Name != "Mean Reversion" || loaded.Exchange != "OKX" || loaded.Side != "sell" || loaded.ModelProfile != "claude_cli" || loaded.Concurrency != 8 || loaded.MaxSteps != 4 {
 		t.Fatalf("loaded profile = %#v", loaded)
 	}
 }

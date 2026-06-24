@@ -105,7 +105,7 @@ The repository includes `.github/workflows/build-clients.yml`, `.github/workflow
 
 It runs on push, pull request, and manual dispatch:
 
-- `Test and Build Web UI`: installs Node/Go dependencies, builds the embedded Web UI, runs `go test ./...`, builds the local Web client binary, and uploads `ccvar-web-embedded-ui`.
+- `Test and Build Web UI`: installs Node/Go dependencies, builds the embedded Web UI, runs `go test ./...`, builds the local Web client binary, starts the packaged client, runs no-secret smoke plus Playwright UI quality checks, and uploads `ccvar-web-embedded-ui`.
 - `Package macOS and Windows Clients`: runs `npm run verify:release`, which rebuilds and verifies deterministic macOS/Windows browser-launcher desktop packages, then uploads `ccvar-desktop-release`.
 - `Native macOS Client`: builds the standalone AppKit/WKWebView client and the macOS browser-launcher app on a macOS runner, then uploads `ccvar-native-macos`.
 - `Native Windows Client`: builds the standalone WinForms/WebView2 client and the Windows browser-launcher command on a Windows runner, then uploads `ccvar-native-windows`.
@@ -128,7 +128,7 @@ Real sandbox completion is intentionally manual. Add these repository secrets, t
 - `OKX_DEMO_API_SECRET`
 - `OKX_DEMO_API_PASSPHRASE`
 
-That workflow starts the local client on `127.0.0.1:8787`, runs `audit:final` with `CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true`, enforces `npm run audit:complete`, and uploads sanitized final audit reports. It does not print or artifact API keys, API secrets, OKX passphrases, Vault passphrases, ciphertext, salt, or nonce.
+That workflow starts the local client on `127.0.0.1:8787`, runs `audit:final` with `CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true`, enforces `npm run audit:complete`, and uploads sanitized final audit reports plus UI quality evidence. It does not print or artifact API keys, API secrets, OKX passphrases, Vault passphrases, ciphertext, salt, or nonce.
 
 For a step-by-step operator checklist, see `docs/real-sandbox-acceptance.zh-CN.md`. For local runs, copy `.env.acceptance.example` to `.env.acceptance.local`, fill sandbox-only credentials, configure the non-secret acceptance parameters if needed, and source it before `npm run audit:final`.
 
@@ -166,7 +166,7 @@ npm run audit:final
 npm run audit:complete
 ```
 
-`audit:final` runs shell syntax checks, delegates to `verify:release`, optionally smoke-tests the currently running local client at `http://127.0.0.1:8787`, and writes a sanitized machine-readable handoff report to `dist/final-audit/final-audit-latest.json`. By default it records real exchange sandbox acceptance as not run, because that proof requires operator-provided Binance Spot Testnet or OKX Demo Trading environment variables. To include external sandbox proof for both exchanges in the same report, set `CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true` and `CCVAR_FINAL_AUDIT_REAL_EXCHANGES=Binance,OKX` with exchange-specific sandbox credentials.
+`audit:final` runs shell syntax checks, delegates to `verify:release`, optionally smoke-tests and UI-quality-checks the currently running local client at `http://127.0.0.1:8787`, and writes a sanitized machine-readable handoff report to `dist/final-audit/final-audit-latest.json`. By default it records real exchange sandbox acceptance as not run, because that proof requires operator-provided Binance Spot Testnet or OKX Demo Trading environment variables. To include external sandbox proof for both exchanges in the same report, set `CCVAR_FINAL_AUDIT_RUN_REAL_ACCEPTANCE=true` and `CCVAR_FINAL_AUDIT_REAL_EXCHANGES=Binance,OKX` with exchange-specific sandbox credentials.
 
 `audit:complete` is the final completion gate. It reads `dist/final-audit/final-audit-latest.json`, verifies release artifacts, safety evidence, sandbox credential readiness, and fails until both Binance and OKX real sandbox acceptance reports are present and passed.
 
@@ -193,6 +193,14 @@ Local no-secret smoke test:
 ```bash
 npm run smoke:local
 ```
+
+UI quality regression check:
+
+```bash
+npm run ui:quality
+```
+
+`ui:quality` opens the local client with Playwright and checks dark/light themes across desktop, tablet, and mobile viewports. It fails on document-level horizontal overflow, visible default scrollbars, hover/focus scrollbars wider than 2px, unnamed controls, undersized enabled buttons, broken dropdown Escape behavior, and modal layout problems such as clipped or overlapping sections. Use `CCVAR_UI_QUALITY_URL=http://127.0.0.1:8788` to point it at a non-default local client, and `CCVAR_UI_QUALITY_OUT_DIR=dist/ui-quality-local` to choose where screenshots and `ui-quality-latest.json` are written.
 
 Sandbox credential environment readiness, without printing secret values:
 

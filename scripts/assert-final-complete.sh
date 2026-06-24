@@ -57,6 +57,7 @@ for (const [name, status] of Object.entries({
   shellSyntax: "passed",
   verifyRelease: "passed",
   currentInstanceSmoke: "passed",
+  currentInstanceUiQuality: "passed",
 })) {
   if (commands[name] !== status) {
     fail(`final audit command gate ${name} is not ${status}`, { commands });

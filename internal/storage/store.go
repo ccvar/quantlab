@@ -243,6 +243,9 @@ type StrategyProfileRecord struct {
 	Exchange        string  `json:"exchange"`
 	Symbol          string  `json:"symbol"`
 	Side            string  `json:"side"`
+	ModelProfile    string  `json:"modelProfile"`
+	ModelFallback   string  `json:"modelFallback"`
+	Concurrency     int     `json:"concurrency"`
 	OrderSizeUSDT   float64 `json:"orderSizeUsdt"`
 	IntervalSeconds int     `json:"intervalSeconds"`
 	MaxSteps        int     `json:"maxSteps"`
@@ -1034,6 +1037,9 @@ func DefaultStrategyProfile() StrategyProfileRecord {
 		Exchange:        "Binance",
 		Symbol:          "BTCUSDT",
 		Side:            "buy",
+		ModelProfile:    "local_policy",
+		ModelFallback:   "local_policy",
+		Concurrency:     2,
 		OrderSizeUSDT:   500,
 		IntervalSeconds: 15,
 		MaxSteps:        0,
@@ -1050,6 +1056,15 @@ func NormalizeStrategyProfile(record StrategyProfileRecord) StrategyProfileRecor
 	normalized.Side = strings.ToLower(defaultString(record.Side, defaults.Side))
 	if normalized.Side != "sell" {
 		normalized.Side = "buy"
+	}
+	normalized.ModelProfile = defaultString(record.ModelProfile, defaults.ModelProfile)
+	normalized.ModelFallback = defaultString(record.ModelFallback, defaults.ModelFallback)
+	normalized.Concurrency = record.Concurrency
+	if normalized.Concurrency <= 0 {
+		normalized.Concurrency = defaults.Concurrency
+	}
+	if normalized.Concurrency > 8 {
+		normalized.Concurrency = 8
 	}
 	normalized.OrderSizeUSDT = positiveOrDefault(record.OrderSizeUSDT, defaults.OrderSizeUSDT)
 	normalized.IntervalSeconds = record.IntervalSeconds
@@ -1078,6 +1093,9 @@ func (s *Store) StrategyProfile(ctx context.Context) (StrategyProfileRecord, err
 			exchange,
 			symbol,
 			side,
+			model_profile,
+			model_fallback,
+			concurrency,
 			order_size_usdt,
 			interval_seconds,
 			max_steps,
@@ -1108,16 +1126,22 @@ func (s *Store) SaveStrategyProfile(ctx context.Context, record StrategyProfileR
 			exchange,
 			symbol,
 			side,
+			model_profile,
+			model_fallback,
+			concurrency,
 			order_size_usdt,
 			interval_seconds,
 			max_steps,
 			updated_at
-		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			exchange = excluded.exchange,
 			symbol = excluded.symbol,
 			side = excluded.side,
+			model_profile = excluded.model_profile,
+			model_fallback = excluded.model_fallback,
+			concurrency = excluded.concurrency,
 			order_size_usdt = excluded.order_size_usdt,
 			interval_seconds = excluded.interval_seconds,
 			max_steps = excluded.max_steps,
@@ -1126,6 +1150,9 @@ func (s *Store) SaveStrategyProfile(ctx context.Context, record StrategyProfileR
 		record.Exchange,
 		record.Symbol,
 		record.Side,
+		record.ModelProfile,
+		record.ModelFallback,
+		record.Concurrency,
 		record.OrderSizeUSDT,
 		record.IntervalSeconds,
 		record.MaxSteps,
@@ -1832,6 +1859,9 @@ func scanStrategyProfile(scanner auditScanner) (StrategyProfileRecord, error) {
 		&record.Exchange,
 		&record.Symbol,
 		&record.Side,
+		&record.ModelProfile,
+		&record.ModelFallback,
+		&record.Concurrency,
 		&record.OrderSizeUSDT,
 		&record.IntervalSeconds,
 		&record.MaxSteps,
@@ -1929,6 +1959,9 @@ func (s *Store) init(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.ensureStrategyProfileColumns(ctx); err != nil {
+		return err
+	}
 	var count int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM experiment_runs`).Scan(&count); err != nil {
 		return err
@@ -1937,6 +1970,50 @@ func (s *Store) init(ctx context.Context) error {
 		return s.seed(ctx)
 	}
 	return nil
+}
+
+func (s *Store) ensureStrategyProfileColumns(ctx context.Context) error {
+	columns, err := tableColumns(ctx, s.db, "strategy_profiles")
+	if err != nil {
+		return err
+	}
+	alterations := map[string]string{
+		"model_profile":  `ALTER TABLE strategy_profiles ADD COLUMN model_profile TEXT NOT NULL DEFAULT 'local_policy'`,
+		"model_fallback": `ALTER TABLE strategy_profiles ADD COLUMN model_fallback TEXT NOT NULL DEFAULT 'local_policy'`,
+		"concurrency":    `ALTER TABLE strategy_profiles ADD COLUMN concurrency INTEGER NOT NULL DEFAULT 2`,
+	}
+	for column, statement := range alterations {
+		if columns[column] {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
 }
 
 func (s *Store) LabState(ctx context.Context) (LabState, error) {
@@ -2430,6 +2507,9 @@ var schema = []string{
 		exchange TEXT NOT NULL,
 		symbol TEXT NOT NULL,
 		side TEXT NOT NULL,
+		model_profile TEXT NOT NULL DEFAULT 'local_policy',
+		model_fallback TEXT NOT NULL DEFAULT 'local_policy',
+		concurrency INTEGER NOT NULL DEFAULT 2,
 		order_size_usdt REAL NOT NULL,
 		interval_seconds INTEGER NOT NULL,
 		max_steps INTEGER NOT NULL,

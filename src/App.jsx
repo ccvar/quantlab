@@ -14,8 +14,10 @@ import {
   Gauge,
   KeyRound,
   Languages,
+  LoaderCircle,
   LockKeyhole,
   Maximize2,
+  Minimize2,
   Moon,
   Pause,
   Play,
@@ -102,11 +104,22 @@ function formatSignedPct(value) {
   return `${sign}${Math.abs(value || 0).toFixed(2)}%`;
 }
 
+function formatSignedNumber(value, digits = 1) {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${Math.abs(value || 0).toFixed(digits)}`;
+}
+
 function formatMarketDataSource(value) {
   const normalized = String(value || "").toLowerCase();
   if (normalized.includes("seed")) return "seed";
   if (normalized.includes("public") || normalized.includes("live")) return "live";
   return value || "-";
+}
+
+function marketDataSourceLabel(t, value) {
+  const source = formatMarketDataSource(value);
+  if (source === "seed" || source === "live" || source === "replay") return marketDataModeShortLabel(t, source);
+  return source;
 }
 
 function classNames(...values) {
@@ -132,14 +145,22 @@ const statusMessageKeys = new Map([
   ["Read only", "status.read_only"],
   ["Unlocked", "status.unlocked"],
   ["Locked", "status.locked"],
+  ["kill switch clear", "status.kill_switch_clear"],
   ["Saving", "status.saving"],
   ["Saved", "status.saved"],
+  ["Draft", "status.draft"],
   ["Run needed", "status.run_needed"],
   ["Running", "status.running"],
+  ["Idle", "status.idle"],
+  ["API unavailable", "status.api_unavailable"],
+  ["Market data timeout", "status.market_data_timeout"],
+  ["Network error", "status.network_error"],
   ["Exporting", "status.exporting"],
   ["Failed", "status.failed"],
   ["Pruning", "status.pruning"],
   ["Resetting", "status.resetting"],
+  ["Confirm reset", "status.confirm_reset"],
+  ["Phrase mismatch", "status.phrase_mismatch"],
   ["Stop AI first", "status.stop_ai_first"],
   ["Syncing", "status.syncing"],
   ["Executing", "status.executing"],
@@ -148,13 +169,265 @@ const statusMessageKeys = new Map([
   ["Locking", "status.locking"],
   ["Updated", "status.updated"],
   ["Unavailable", "status.unavailable"],
+  ["kill switch unavailable", "status.kill_switch_unavailable"],
   ["Guard locked", "status.guard_locked"],
 ]);
 
+function normalizeStatusValue(value) {
+  if (!value) return value;
+  const raw = String(value);
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("returned 404") || normalized.includes("404 not found") || normalized === "404") {
+    return "API unavailable";
+  }
+  if (normalized.includes("context deadline exceeded") || normalized.includes("client.timeout") || normalized.includes("timeout")) {
+    return "Market data timeout";
+  }
+  if (normalized.includes("failed to fetch") || normalized.includes("network") || normalized.includes("connection refused")) {
+    return "Network error";
+  }
+  const aliases = {
+    idle: "Idle",
+    running: "Running",
+    unavailable: "Unavailable",
+    failed: "Failed",
+  };
+  if (aliases[normalized]) return aliases[normalized];
+  return value;
+}
+
 function statusText(t, value) {
   if (!value) return "-";
-  const key = statusMessageKeys.get(value);
-  return key ? t(key, value) : value;
+  const normalizedValue = normalizeStatusValue(value);
+  const key = statusMessageKeys.get(normalizedValue);
+  return key ? t(key, normalizedValue) : normalizedValue;
+}
+
+function rawErrorMessage(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  return error.message || String(error);
+}
+
+function sanitizeErrorMessage(message) {
+  return String(message || "")
+    .replace(/((?:api[_\s-]?key|api[_\s-]?secret|secret|passphrase|token)\s*[:=]\s*)(["']?)[^\s,;]+/gi, "$1$2***")
+    .trim();
+}
+
+const localizedErrorRules = [
+  [/^method not allowed$/i, "errors.methodNotAllowed", "This action uses an unsupported request method."],
+  [/^origin not allowed$/i, "errors.originNotAllowed", "This page origin is not allowed by the local API."],
+  [/^unsupported exchange$/i, "errors.unsupportedExchange", "This exchange is not supported yet."],
+  [/^valid id is required$/i, "errors.validIdRequired", "The selected record is invalid. Refresh and try again."],
+  [/^exchange is required$/i, "errors.exchangeRequired", "Choose an exchange."],
+  [/^api key is required$/i, "errors.apiKeyRequired", "Enter the exchange API Key."],
+  [/^api secret is required$/i, "errors.apiSecretRequired", "Enter the exchange API Secret."],
+  [/^okx api passphrase is required$/i, "errors.okxPassphraseRequired", "OKX requires an API Passphrase."],
+  [/^passphrase must be at least 12 characters$/i, "errors.passphraseMinLength", "The vault passphrase must be at least 12 characters."],
+  [/^withdrawal permission is not allowed$/i, "errors.withdrawalForbidden", "Withdrawal permission is not allowed for safety."],
+  [/^unsupported kdf\b/i, "errors.unsupportedVaultFormat", "This saved key uses an unsupported vault format."],
+  [/message authentication failed|cipher: message authentication failed|decrypt/i, "errors.credentialDecryptFailed", "Vault decrypt failed. Check the passphrase."],
+  [/^credential id is required$/i, "errors.credentialIdRequired", "Choose a saved trading key."],
+  [/^credential passphrase is required$/i, "errors.credentialPassphraseRequired", "Enter the vault passphrase."],
+  [/^credential exchange does not match request$/i, "errors.credentialExchangeMismatch", "The selected key does not match the current exchange."],
+  [/^credential exchange does not match execution$/i, "errors.credentialExchangeMismatch", "The selected key does not match the current exchange."],
+  [/^credential trade permission is required$/i, "errors.credentialTradePermission", "This key has no trade permission."],
+  [/^credential \d+ not found$/i, "errors.credentialNotFound", "The selected trading key was not found. Refresh the vault."],
+  [/^live guard is locked$/i, "errors.liveGuardLocked", "Live Guard is locked."],
+  [/^unlock phrase must be ENABLE TESTNET LIVE$/i, "errors.unlockPhraseRequired", "Type ENABLE TESTNET LIVE to unlock testnet live mode."],
+  [/^production live trading is disabled$/i, "errors.productionLiveDisabled", "Production live trading is disabled in this release."],
+  [/^unlock ttl must be between 60 and 900 seconds$/i, "errors.unlockTtlRange", "Unlock TTL must be between 60 and 900 seconds."],
+  [/^action must be unlock or lock$/i, "errors.guardActionInvalid", "Guard action must be unlock or lock."],
+  [/^action must be activate or resume$/i, "errors.killSwitchActionInvalid", "Kill Switch action must be activate or resume."],
+  [/^action must be start, stop, or step$/i, "errors.autopilotActionInvalid", "Autopilot action must be start, stop, or step."],
+  [/^kill switch is active$/i, "errors.killSwitchActive", "Kill Switch is active. Resume it before continuing."],
+  [/^autopilot is already running$/i, "errors.autopilotAlreadyRunning", "Autopilot is already running."],
+  [/^autopilot is not running$/i, "errors.autopilotNotRunning", "Autopilot is not running."],
+  [/^autopilot mode must be shadow, paper, or live$/i, "errors.autopilotModeInvalid", "Autopilot mode must be Shadow, Paper, or Live."],
+  [/^live autopilot requires credential id and vault passphrase$/i, "errors.liveAutopilotCredentialRequired", "Live Autopilot requires a trading key and vault passphrase."],
+  [/^simulation runner is not configured$/i, "errors.simulationRunnerMissing", "Simulation runner is not configured."],
+  [/^live executor is not configured$/i, "errors.liveExecutorMissing", "Live executor is not configured."],
+  [/^recent account snapshot is required before live execution$/i, "errors.accountSnapshotRequired", "Sync an account snapshot before live execution."],
+  [/^account snapshot is stale; sync account before live execution$/i, "errors.accountSnapshotStale", "The account snapshot is stale. Sync again before execution."],
+  [/^account snapshot indicates trading is disabled$/i, "errors.accountCannotTrade", "The synced account indicates trading is disabled."],
+  [/^account sync supports only testnet or demo$/i, "errors.accountSyncEnvironment", "Account sync only supports testnet or demo."],
+  [/^live reconciliation supports only testnet or demo$/i, "errors.reconcileEnvironment", "Live reconciliation only supports testnet or demo."],
+  [/^validation-only execution has no exchange order to reconcile$/i, "errors.validationOnlyNoOrder", "Validation-only execution has no exchange order to reconcile."],
+  [/^live execution was not submitted to an exchange$/i, "errors.executionNotSubmitted", "This execution was not submitted to an exchange."],
+  [/^live execution id is required$/i, "errors.liveExecutionIdRequired", "Choose a live execution record first."],
+  [/^live execution record not found$/i, "errors.liveExecutionNotFound", "The live execution record was not found."],
+  [/^unsupported account sync exchange$/i, "errors.unsupportedAccountSyncExchange", "This exchange is not supported for account sync."],
+  [/^unsupported live execution exchange$/i, "errors.unsupportedLiveExecutionExchange", "This exchange is not supported for live execution."],
+  [/^unsupported live reconciliation exchange$/i, "errors.unsupportedLiveReconciliationExchange", "This exchange is not supported for reconciliation."],
+  [/^binance api key and secret are required$/i, "errors.binanceAuthRequired", "Binance requires API Key and API Secret."],
+  [/^okx api key, secret, and api passphrase are required$/i, "errors.okxAuthRequired", "OKX requires API Key, API Secret, and API Passphrase."],
+  [/^binance .* supports only testnet or demo$/i, "errors.binanceEnvironment", "Binance private operations only support testnet or demo here."],
+  [/^okx .* supports demo environment only$/i, "errors.okxEnvironment", "OKX private operations only support demo here."],
+  [/^backtest requires at least slow window plus two candles$/i, "errors.backtestNotEnoughCandles", "Backtest needs more candle data for the selected windows."],
+  [/^stop autopilot before resetting paper ledger$/i, "errors.stopAutopilotBeforePaperReset", "Stop Autopilot before resetting the paper ledger."],
+  [/^confirmation phrase must be RESET PAPER$/i, "errors.resetPaperPhrase", "Type RESET PAPER to reset the paper ledger."],
+  [/^stop autopilot before pruning local data$/i, "errors.stopAutopilotBeforePrune", "Stop Autopilot before pruning local data."],
+  [/^confirmation phrase must be PRUNE LOCAL DATA$/i, "errors.prunePhrase", "Type PRUNE LOCAL DATA before pruning local research data."],
+  [/^unsupported prune table$/i, "errors.unsupportedPruneTable", "This local data table cannot be pruned from the UI."],
+  [/^exchange and symbol are required$/i, "errors.exchangeSymbolRequired", "Choose an exchange and symbol."],
+  [/^order size must be positive$/i, "errors.orderSizePositive", "Order size must be greater than 0."],
+  [/^order size [\d.,]+ exceeds [\d.,]+$/i, "errors.orderSizeExceedsRisk", "Order size exceeds the current risk limit."],
+  [/^invalid risk limits$/i, "errors.invalidRiskLimits", "Risk limits are invalid. Review max order, drawdown, confidence, and spread."],
+  [/^invalid strategy defaults$/i, "errors.invalidStrategyDefaults", "Strategy defaults are invalid. Review exchange, symbol, side, model route, and order size."],
+  [/failed to fetch|network|connection refused/i, "errors.network", "Cannot reach the local API. Check that the client service is running."],
+  [/timeout|context deadline exceeded|client\.timeout/i, "errors.timeout", "The request timed out. Check the exchange connection and try again."],
+];
+
+function localizedErrorDetail(t, error) {
+  const raw = sanitizeErrorMessage(rawErrorMessage(error));
+  if (!raw) return t("errors.generic", "Something went wrong. Try again.");
+
+  const jsonField = raw.match(/^json: unknown field "([^"]+)"$/i);
+  if (jsonField) {
+    return t("errors.unknownField", "Unsupported field: {field}. Refresh and try again.", { field: jsonField[1] });
+  }
+
+  const apiStatus = raw.match(/^(?:api|[\w\s-]+) returned (\d{3})$/i);
+  if (apiStatus) {
+    return t("errors.httpStatus", "Local API returned HTTP {status}.", { status: apiStatus[1] });
+  }
+
+  const exchangeCode = raw.match(/^(binance|okx).*(?:returned|rejected)(?: code)?\s+([^:]+)(?::\s*(.+))?$/i);
+  if (exchangeCode) {
+    return t("errors.exchangeReturned", "{exchange} returned {code}: {message}", {
+      exchange: exchangeCode[1].toUpperCase(),
+      code: exchangeCode[2].trim(),
+      message: (exchangeCode[3] || "-").trim(),
+    });
+  }
+
+  for (const [pattern, key, fallback] of localizedErrorRules) {
+    if (pattern.test(raw)) return t(key, fallback);
+  }
+
+  return t("errors.unknownWithDetail", "Unexpected error: {message}", { message: raw });
+}
+
+function localizedErrorMessage(t, error, contextKey = "generic") {
+  const detail = localizedErrorDetail(t, error);
+  return t(`errors.context.${contextKey}`, "{message}", { message: detail });
+}
+
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  const previousFocus = typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the synchronous textarea path for desktop shells and restricted browser contexts.
+    }
+  }
+  if (typeof document === "undefined") return false;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-1000px";
+  textarea.style.left = "-1000px";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.focus({ preventScroll: true });
+  textarea.select();
+  try {
+    return document.execCommand?.("copy") === true;
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+    if (previousFocus && document.contains(previousFocus)) {
+      previousFocus.focus?.({ preventScroll: true });
+    }
+  }
+}
+
+function notifyError(notify, t, error, contextKey) {
+  notify(localizedErrorMessage(t, error, contextKey), "danger");
+}
+
+function compactStatusText(t, value, maxLength = 64) {
+  const text = statusText(t, value);
+  if (!value) return text;
+  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
+}
+
+function compactStatusTitle(t, value) {
+  const fullText = statusText(t, value);
+  const compactText = compactStatusText(t, value);
+  return fullText !== compactText ? fullText : undefined;
+}
+
+function sourceStatusText(t, value) {
+  switch (value) {
+    case "api":
+      return t("top.apiOk", "OK");
+    case "fallback":
+      return t("top.apiFallback", "Offline");
+    case "loading":
+      return t("top.apiChecking", "Checking");
+    default:
+      return value ? String(value) : "-";
+  }
+}
+
+function eventText(t, value) {
+  if (value === undefined || value === null || value === "") return "";
+  const text = String(value);
+  const bidAskSpread = text.match(/^bid\s+(.+)\s+\/\s+ask\s+(.+)\s+\/\s+spread\s+(.+)$/i);
+  if (bidAskSpread) {
+    return t("events.bidAskSpread", "bid {bid} / ask {ask} / spread {spread}", {
+      bid: bidAskSpread[1],
+      ask: bidAskSpread[2],
+      spread: bidAskSpread[3],
+    });
+  }
+  if (text.startsWith("Conf:")) {
+    return text.replace(/^Conf:/, t("events.confPrefix", "Conf:"));
+  }
+  return choiceLabel(t, text);
+}
+
+function reasoningText(t, value) {
+  const text = String(value || "");
+  if (text === "Local AI Policy evaluated public market features for AI Momentum Pro; BUY intent uses 500 USDT with 78% confidence. Spread and liquidity are supportive while funding pressure remains contained.") {
+    return t("sample.reasoningMomentum", text);
+  }
+  const policyReasoning = text.match(/^(Local AI Policy)(?:\s+(\S+))?\s+evaluated public market features for (.*?);\s+([A-Z]+) intent uses ([\d.,]+\s+USDT) with ([\d.]+)% confidence\. Spread ([^,]+), liquidity ([^.]+)\. Simulation policy only unless routed through Live Guard\.$/);
+  if (policyReasoning) {
+    const [, policy, version, strategy, side, size, confidence, spread, liquidity] = policyReasoning;
+    return t("sample.localPolicyReasoning", "{policy}{version} evaluated public market features for {strategy}; {side} intent uses {size} with {confidence}% confidence. Spread {spread}, liquidity {liquidity}. Simulation policy only unless routed through Live Guard.", {
+      policy: policy === "Local AI Policy" ? t("aiConfig.providerTitles.local_policy", "Local AI Policy") : policy,
+      version: version ? ` ${version}` : "",
+      strategy,
+      side: choiceLabel(t, side),
+      size,
+      confidence,
+      spread,
+      liquidity,
+    });
+  }
+  return text || "-";
+}
+
+function modelMetaText(t, value) {
+  return String(value || "-").replace(/\btick\b/g, t("units.tick", "tick"));
+}
+
+function latencyToneClass(value) {
+  const latency = Number(value || 0);
+  if (latency > 8000) return "negative-text";
+  if (latency > 1500) return "warn-text";
+  return "positive-text";
 }
 
 function readStoredLocale() {
@@ -210,6 +483,135 @@ function useEscapeToClose(open, onClose) {
   }, [open, onClose]);
 }
 
+function useDismissOnOutside(open, ref, onClose) {
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return undefined;
+    const handlePointerDown = (event) => {
+      if (!ref.current?.contains(event.target)) {
+        onClose();
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [open, ref, onClose]);
+}
+
+function focusFirstMenuItem(container) {
+  window.requestAnimationFrame(() => {
+    const firstItem = container?.querySelector?.('[role="menuitem"], [role="menuitemcheckbox"], [role="option"]');
+    firstItem?.focus?.({ preventScroll: true });
+  });
+}
+
+function focusMenuTrigger(container) {
+  window.requestAnimationFrame(() => {
+    const trigger = container?.querySelector?.("[aria-haspopup]");
+    trigger?.focus?.({ preventScroll: true });
+  });
+}
+
+function handleMenuTriggerKeyDown(event, openMenu) {
+  if (!["ArrowDown", "Enter", " "].includes(event.key)) return false;
+  event.preventDefault();
+  openMenu();
+  return true;
+}
+
+function handleMenuListKeyDown(event, { container, closeMenu }) {
+  const items = Array.from(container?.querySelectorAll?.('[role="menuitem"], [role="menuitemcheckbox"], [role="option"]') || []);
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMenu();
+    focusMenuTrigger(container);
+    return true;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) || items.length === 0) return false;
+  event.preventDefault();
+  const currentIndex = Math.max(0, items.indexOf(document.activeElement));
+  const nextIndex = event.key === "Home"
+    ? 0
+    : event.key === "End"
+      ? items.length - 1
+      : event.key === "ArrowUp"
+        ? (currentIndex - 1 + items.length) % items.length
+        : (currentIndex + 1) % items.length;
+  items[nextIndex]?.focus?.({ preventScroll: true });
+  return true;
+}
+
+function useDialogFocus(open) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return undefined;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableSelector = [
+      ".icon-close",
+      "a[href]",
+      "button:not(:disabled)",
+      "input:not(:disabled)",
+      "select:not(:disabled)",
+      "textarea:not(:disabled)",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const getFocusableElements = () => {
+      const dialog = dialogRef.current;
+      if (!dialog) return [];
+      return Array.from(dialog.querySelectorAll(focusableSelector)).filter((element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        if (element.getAttribute("aria-hidden") === "true") return false;
+        const style = window.getComputedStyle(element);
+        if (style.display === "none" || style.visibility === "hidden") return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    };
+    const focusFrame = window.requestAnimationFrame(() => {
+      const target = dialogRef.current?.querySelector("[data-autofocus]") || getFocusableElements()[0];
+      target?.focus?.({ preventScroll: true });
+    });
+    const handleKeyDown = (event) => {
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = getFocusableElements();
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (!active || !dialog.contains(active)) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+        return;
+      }
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+        return;
+      }
+      if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown, true);
+      if (!previousFocus || !document.contains(previousFocus)) return;
+      window.requestAnimationFrame(() => {
+        previousFocus.focus?.({ preventScroll: true });
+      });
+    };
+  }, [open]);
+
+  return dialogRef;
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -234,6 +636,62 @@ function formatClock(value) {
     second: "2-digit",
     hour12: false,
   });
+}
+
+function formatReplayTimestamp(seconds) {
+  if (!seconds) return "-";
+  const date = new Date(Number(seconds) * 1000);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("en-GB", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function buildReplayOptions(t, labState, backtestResult) {
+  const options = [];
+  const seen = new Set();
+  const add = (option) => {
+    if (!option?.value || seen.has(option.value)) return;
+    seen.add(option.value);
+    options.push(option);
+  };
+  const candles = labState?.candles || [];
+  const markers = [
+    { index: 18, tag: t("panels.buySignal", "BUY signal") },
+    { index: 34, tag: t("panels.sellSignal", "SELL signal") },
+    { index: 54, tag: t("panels.buySignal", "BUY signal") },
+    { index: 72, tag: t("panels.sellSignal", "SELL signal") },
+    { index: 90, tag: t("panels.buySignal", "BUY signal") },
+  ];
+  markers.forEach(({ index, tag }) => {
+    const candle = candles[index];
+    if (!candle?.time) return;
+    add({
+      value: `candle:${candle.time}`,
+      label: formatReplayTimestamp(candle.time),
+      tag,
+    });
+  });
+  const latest = candles[candles.length - 1];
+  if (latest?.time) {
+    add({
+      value: `candle:${latest.time}`,
+      label: formatReplayTimestamp(latest.time),
+      tag: t("panels.latestCandle", "Latest candle"),
+    });
+  }
+  (backtestResult?.trades || []).slice(-3).reverse().forEach((trade) => {
+    add({
+      value: `trade:${trade.id}`,
+      label: formatDateTime(trade.openedAt),
+      tag: `${String(trade.side || "").toUpperCase()} ${trade.id}`,
+    });
+  });
+  return options.slice(0, 7);
 }
 
 function normalizeAutopilotResult(result) {
@@ -351,6 +809,9 @@ const defaultStrategyProfile = {
   exchange: "Binance",
   symbol: "BTCUSDT",
   side: "buy",
+  modelProfile: "local_policy",
+  modelFallback: "local_policy",
+  concurrency: 2,
   orderSizeUsdt: 500,
   intervalSeconds: 15,
   maxSteps: 0,
@@ -481,6 +942,85 @@ const defaultAIProviders = {
   ],
 };
 
+const strategyModelRoutes = [
+  { value: "local_policy", labelKey: "modelRoutes.localPolicy", fallback: "Local Policy", badgeKey: "modelRoutes.localPolicyShort", badge: "Local" },
+  { value: "codex_cli", labelKey: "modelRoutes.codexCli", fallback: "Codex CLI", badgeKey: "modelRoutes.codexCliShort", badge: "Codex" },
+  { value: "claude_cli", labelKey: "modelRoutes.claudeCli", fallback: "Claude CLI", badgeKey: "modelRoutes.claudeCliShort", badge: "Claude" },
+  { value: "compatible_endpoint", labelKey: "modelRoutes.compatibleEndpoint", fallback: "Local Endpoint", badgeKey: "modelRoutes.compatibleEndpointShort", badge: "Endpoint" },
+];
+
+const marketDataModes = [
+  {
+    value: "live",
+    labelKey: "dataModes.live",
+    fallback: "Live public",
+    shortKey: "dataModes.liveShort",
+    short: "Live",
+    detailKey: "dataModes.liveDetail",
+    detail: "Exchange API stream",
+  },
+  {
+    value: "seed",
+    labelKey: "dataModes.seed",
+    fallback: "Local seed",
+    shortKey: "dataModes.seedShort",
+    short: "Seed",
+    detailKey: "dataModes.seedDetail",
+    detail: "Offline demo data",
+  },
+  {
+    value: "replay",
+    labelKey: "dataModes.replay",
+    fallback: "Replay cache",
+    shortKey: "dataModes.replayShort",
+    short: "Replay",
+    detailKey: "dataModes.replayDetail",
+    detail: "Pause on historical cursor",
+  },
+];
+
+function normalizeStrategyProfile(profile) {
+  return { ...defaultStrategyProfile, ...(profile || {}) };
+}
+
+function modelRouteMeta(value) {
+  return strategyModelRoutes.find((route) => route.value === value) || strategyModelRoutes[0];
+}
+
+function modelRouteLabel(t, value) {
+  const route = modelRouteMeta(value);
+  return t(route.labelKey, route.fallback);
+}
+
+function modelRouteBadge(t, value) {
+  const route = modelRouteMeta(value);
+  return t(route.badgeKey, route.badge);
+}
+
+function runModelProfile(run, index, fallback = defaultStrategyProfile.modelProfile) {
+  const sampleRoutes = [fallback, "codex_cli", "local_policy", "claude_cli", "compatible_endpoint"];
+  return run?.modelProfile || run?.modelRoute || sampleRoutes[index % sampleRoutes.length];
+}
+
+function marketDataModeMeta(value) {
+  return marketDataModes.find((item) => item.value === value) || marketDataModes[0];
+}
+
+function marketDataModeLabel(t, value) {
+  const item = marketDataModeMeta(value);
+  return t(item.labelKey, item.fallback);
+}
+
+function marketDataModeShortLabel(t, value) {
+  const item = marketDataModeMeta(value);
+  return t(item.shortKey, item.short);
+}
+
+function marketDataModeDetail(t, value) {
+  const item = marketDataModeMeta(value);
+  return t(item.detailKey, item.detail);
+}
+
 const defaultVaultTestForm = {
   credentialId: "",
   passphrase: "",
@@ -499,11 +1039,14 @@ export function App() {
   const t = useMemo(() => makeTranslator(locale), [locale]);
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
+  const skipNextBacktestAutoRunRef = useRef(false);
+  const labModeInitializedRef = useRef(false);
   const [labState, setLabState] = useState(fallbackLabState);
   const [sourceStatus, setSourceStatus] = useState("loading");
   const [selectedRun, setSelectedRun] = useState(0);
   const [mode, setMode] = useState("Shadow");
   const [dataSource, setDataSource] = useState("Binance");
+  const [marketDataMode, setMarketDataMode] = useState("live");
   const [workspaceTab, setWorkspaceTab] = useState("Real-time Sim");
   const [bottomTab, setBottomTab] = useState("Performance");
   const [eventFilter, setEventFilter] = useState("All");
@@ -513,7 +1056,9 @@ export function App() {
   const [isStopped, setIsStopped] = useState(false);
   const [isRunStopped, setIsRunStopped] = useState(false);
   const [killSwitch, setKillSwitch] = useState({ active: false, message: "kill switch clear" });
+  const [isUpdatingKillSwitch, setIsUpdatingKillSwitch] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
+  const [replayCursor, setReplayCursor] = useState("");
   const [isSimulating, setIsSimulating] = useState(false);
   const [autopilot, setAutopilot] = useState(defaultAutopilotState);
   const [autopilotRuns, setAutopilotRuns] = useState([]);
@@ -522,6 +1067,8 @@ export function App() {
   const [paperExecutions, setPaperExecutions] = useState([]);
   const [paperResetStatus, setPaperResetStatus] = useState({ tone: "warn", message: "Ready" });
   const [isResettingPaper, setIsResettingPaper] = useState(false);
+  const [isPaperResetConfirmOpen, setIsPaperResetConfirmOpen] = useState(false);
+  const [paperResetPhrase, setPaperResetPhrase] = useState("");
   const [isUpdatingAutopilot, setIsUpdatingAutopilot] = useState(false);
   const autopilotRunAtRef = useRef("");
   const [credentials, setCredentials] = useState([]);
@@ -611,17 +1158,48 @@ export function App() {
 
   useEffect(() => {
     let active = true;
+    if (marketDataMode === "seed") {
+      setSourceStatus("fallback");
+      setLabState({
+        ...fallbackLabState,
+        meta: {
+          ...fallbackLabState.meta,
+          dataSource: "Local seed",
+          selectedMarket: labState?.meta?.selectedMarket || fallbackLabState.meta.selectedMarket,
+        },
+      });
+      return () => {
+        active = false;
+      };
+    }
+    if (marketDataMode === "replay") {
+      setSourceStatus("fallback");
+      setIsPaused(true);
+      setLabState((current) => ({
+        ...current,
+        meta: {
+          ...current.meta,
+          dataSource: "Replay cache",
+        },
+      }));
+      return () => {
+        active = false;
+      };
+    }
     setSourceStatus("loading");
     loadLabState({ exchange: dataSource, symbol: labState?.meta?.selectedMarket || "BTCUSDT" }).then(({ data, source }) => {
       if (!active) return;
       setLabState(data);
-      setMode(data.meta.mode);
+      if (!labModeInitializedRef.current) {
+        setMode(data.meta.mode);
+        labModeInitializedRef.current = true;
+      }
       setSourceStatus(source);
     });
     return () => {
       active = false;
     };
-  }, [dataSource]);
+  }, [dataSource, marketDataMode]);
 
   useEffect(() => {
     refreshCredentials();
@@ -651,6 +1229,10 @@ export function App() {
 
   useEffect(() => {
     if (workspaceTab === "Backtest" && !backtestResult && !isRunningBacktest) {
+      if (skipNextBacktestAutoRunRef.current) {
+        skipNextBacktestAutoRunRef.current = false;
+        return;
+      }
       handleRunBacktest();
     }
   }, [workspaceTab]);
@@ -723,6 +1305,9 @@ export function App() {
     return labState.events.filter((event) => event.type.includes(eventFilter));
   }, [eventFilter, labState]);
 
+  const replayOptions = useMemo(() => buildReplayOptions(t, labState, backtestResult), [t, labState, backtestResult]);
+  const replayPoint = replayOptions.find((option) => option.value === replayCursor) || replayOptions[0] || null;
+
   function handleLocaleChange(nextLocale) {
     const resolved = resolveLocale(nextLocale);
     const nextT = makeTranslator(resolved);
@@ -759,7 +1344,22 @@ export function App() {
     notify(t("toast.exchangeChanged", "Exchange switched to {value}", { value }), "success");
   }
 
+  function handleMarketDataModeChange(value) {
+    const nextMode = marketDataModeMeta(value).value;
+    const label = marketDataModeLabel(t, nextMode);
+    if (nextMode === marketDataMode) {
+      notify(t("toast.dataModeAlreadyActive", "{value} data mode is already active", { value: label }), "info");
+      return;
+    }
+    setMarketDataMode(nextMode);
+    if (nextMode === "replay") {
+      setIsPaused(true);
+    }
+    notify(t("toast.dataModeChanged", "Data mode switched to {value}", { value: label }), nextMode === "live" ? "success" : "warn");
+  }
+
   function handleModeChange(nextMode) {
+    labModeInitializedRef.current = true;
     if (nextMode === mode) {
       notify(t("toast.modeAlreadyActive", "{value} mode is already active", { value: choiceLabel(t, nextMode) }), "info");
       if (nextMode === "Live") {
@@ -779,20 +1379,16 @@ export function App() {
 
   function handleWorkspaceTabChange(tab) {
     if (tab === workspaceTab) {
-      notify(t("toast.workspaceAlreadyOpen", "{value} is already open", { value: choiceLabel(t, tab) }), "info");
       return;
     }
     setWorkspaceTab(tab);
-    notify(t("toast.workspaceChanged", "Opened {value}", { value: choiceLabel(t, tab) }), "success");
   }
 
   function handleBottomTabChange(tab) {
     if (tab === bottomTab) {
-      notify(t("toast.panelAlreadyOpen", "{value} panel is already open", { value: choiceLabel(t, tab) }), "info");
       return;
     }
     setBottomTab(tab);
-    notify(t("toast.panelChanged", "Opened {value} panel", { value: choiceLabel(t, tab) }), "info");
   }
 
   function handleEventFilterChange(filter) {
@@ -832,6 +1428,16 @@ export function App() {
     });
   }
 
+  function handleReplayJump(option) {
+    if (!option) {
+      notify(t("toast.jumpHint", "Jump-to-time uses replay history; choose a backtest or run AI step first"), "warn");
+      return;
+    }
+    setReplayCursor(option.value);
+    setIsPaused(true);
+    notify(t("toast.replayJumped", "Replay cursor moved to {value}", { value: option.label }), "success");
+  }
+
   function handleRunStopToggle() {
     setIsRunStopped((value) => {
       const next = !value;
@@ -850,8 +1456,11 @@ export function App() {
       `Time: ${new Date().toISOString()}`,
       `Mode: ${mode}`,
       `Exchange: ${strategyProfile.exchange || dataSource}`,
+      `Market data: ${marketDataModeLabel(t, marketDataMode)}`,
       `Symbol: ${strategyProfile.symbol || labState.meta.selectedMarket || "BTCUSDT"}`,
       `Strategy: ${strategyProfile.name || labState.meta.strategy}`,
+      `Model route: ${modelRouteLabel(t, strategyProfile.modelProfile)} (fallback ${modelRouteLabel(t, strategyProfile.modelFallback)})`,
+      `Strategy concurrency: ${Number(strategyProfile.concurrency || defaultStrategyProfile.concurrency)} workers, routed through one local risk guard`,
       `Intent: ${String(strategyProfile.side || "buy").toUpperCase()} ${formatMoney(Number(strategyProfile.orderSizeUsdt || 0))} USDT`,
       `Risk guard: max order ${formatMoney(Number(riskProfile.maxOrderUsdt || 0))} USDT, min confidence ${Number(riskProfile.minConfidence || 0).toFixed(2)}`,
       `Current signal: ${verdict.signal || "-"} / confidence ${verdict.confidence || "-"}% / regime ${verdict.regime || "-"}`,
@@ -865,13 +1474,11 @@ export function App() {
 
   async function handleCopyAIContext() {
     const text = buildAIContextSnapshot();
-    try {
-      await navigator.clipboard.writeText(text);
-      notify(t("toast.aiContextCopied", "AI context copied"), "success");
-    } catch {
-      window.prompt(t("prompt.copyAIContext", "Copy this AI context"), text);
-      notify(t("toast.aiContextReady", "AI context is ready to copy"), "warn");
-    }
+    const copied = await copyTextToClipboard(text);
+    notify(
+      copied ? t("toast.aiContextCopied", "AI context copied") : t("toast.copyFailed", "Copy failed. Try again from the desktop menu."),
+      copied ? "success" : "danger"
+    );
   }
 
   async function handleCopyAICommand(command) {
@@ -879,13 +1486,11 @@ export function App() {
       notify(t("toast.actionUnavailable", "Action is not ready yet"), "warn");
       return;
     }
-    try {
-      await navigator.clipboard.writeText(command);
-      notify(t("toast.commandCopied", "Command copied"), "success");
-    } catch {
-      window.prompt(t("prompt.copyCommand", "Copy this command"), command);
-      notify(t("toast.commandReady", "Command is ready to copy"), "warn");
-    }
+    const copied = await copyTextToClipboard(command);
+    notify(
+      copied ? t("toast.commandCopied", "Command copied") : t("toast.copyFailed", "Copy failed. Try again from the desktop menu."),
+      copied ? "success" : "danger"
+    );
   }
 
   function handleRunSelect(index) {
@@ -902,6 +1507,16 @@ export function App() {
       notify(next ? t("toast.archivedShown", "Archived run drawer opened") : t("toast.archivedHidden", "Archived run drawer closed"), "info");
       return next;
     });
+  }
+
+  function handleCreateNewRun() {
+    skipNextBacktestAutoRunRef.current = workspaceTab !== "Backtest";
+    setWorkspaceTab("Backtest");
+    setBottomTab("Performance");
+    setBacktestResult(null);
+    setBacktestStatus({ tone: "warn", message: "Draft" });
+    setIsStrategyPanelOpen(true);
+    notify(t("toast.newRunStarted", "New run draft opened"), "success");
   }
 
   async function handleSimStep() {
@@ -926,6 +1541,7 @@ export function App() {
       notify(t("toast.aiStepComplete", "AI step completed"), "success");
     } catch (error) {
       const now = new Date();
+      const message = localizedErrorDetail(t, error);
       setLabState((current) => ({
         ...current,
         events: [
@@ -936,14 +1552,14 @@ export function App() {
             action: "-",
             price: 0,
             result: "Failed",
-            note: error.message,
+            note: message,
             level: "danger",
           },
           ...current.events,
         ].slice(0, 12),
       }));
       setSourceStatus("fallback");
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      notifyError(notify, t, error, "simStep");
     } finally {
       setIsSimulating(false);
     }
@@ -956,8 +1572,26 @@ export function App() {
       notify(t("toast.stopAiFirst", "Stop AI before resetting paper ledger"), "warn");
       return;
     }
-    const phrase = window.prompt(t("prompt.resetPaper", "Type RESET PAPER to clear the local paper ledger."));
-    if (phrase === null) return;
+    setPaperResetPhrase("");
+    setPaperResetStatus({ tone: "warn", message: "Confirm reset" });
+    setIsPaperResetConfirmOpen(true);
+  }
+
+  function handleClosePaperResetConfirm() {
+    if (isResettingPaper) return;
+    setIsPaperResetConfirmOpen(false);
+    setPaperResetPhrase("");
+    setPaperResetStatus({ tone: "warn", message: "Ready" });
+  }
+
+  async function handleConfirmPaperReset() {
+    if (isResettingPaper) return;
+    const phrase = paperResetPhrase.trim();
+    if (phrase !== "RESET PAPER") {
+      setPaperResetStatus({ tone: "warn", message: "Phrase mismatch" });
+      notify(t("toast.resetPaperPhraseMismatch", "Type RESET PAPER to confirm the reset"), "warn");
+      return;
+    }
     setIsResettingPaper(true);
     setPaperResetStatus({ tone: "loading", message: "Resetting" });
     try {
@@ -970,10 +1604,12 @@ export function App() {
       await refreshPaperExecutions();
       await refreshAuditLog();
       setPaperResetStatus({ tone: "success", message: `Reset ${payload.deletedRecords || 0}` });
+      setIsPaperResetConfirmOpen(false);
+      setPaperResetPhrase("");
       notify(t("toast.paperReset", "Paper ledger reset"), "success");
     } catch (error) {
-      setPaperResetStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setPaperResetStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "paperReset");
       await refreshAuditLog();
     } finally {
       setIsResettingPaper(false);
@@ -988,7 +1624,7 @@ export function App() {
       setCredentialStatus({ tone: "success", message: "Local vault" });
     } catch (error) {
       setCredentials([]);
-      setCredentialStatus({ tone: "warn", message: error.message });
+      setCredentialStatus({ tone: "warn", message: localizedErrorMessage(t, error, "credentialLoad") });
     }
   }
 
@@ -1018,8 +1654,8 @@ export function App() {
       notify(t("toast.credentialSaved", "Credential saved encrypted"), "success");
       await refreshPreflight();
     } catch (error) {
-      setCredentialStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setCredentialStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "credentialSave");
     } finally {
       setIsSavingCredential(false);
     }
@@ -1034,8 +1670,8 @@ export function App() {
       notify(t("toast.credentialDeleted", "Credential deleted"), "success");
       await refreshPreflight();
     } catch (error) {
-      setCredentialStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setCredentialStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "credentialDelete");
     }
   }
 
@@ -1086,8 +1722,8 @@ export function App() {
       notify(t("toast.connectionTested", "Connection test finished"), result.snapshot?.canTrade ? "success" : "warn");
     } catch (error) {
       setVaultTestResult(null);
-      setVaultTestStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setVaultTestStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "vaultTest");
       await refreshAuditLog();
       await refreshPreflight();
     } finally {
@@ -1104,8 +1740,9 @@ export function App() {
         message: state.unlocked ? "Unlocked" : state.message || "Locked",
       });
     } catch (error) {
-      setLiveGuard({ unlocked: false, message: error.message });
-      setLiveGuardStatus({ tone: "danger", message: error.message });
+      const message = localizedErrorDetail(t, error);
+      setLiveGuard({ unlocked: false, message });
+      setLiveGuardStatus({ tone: "danger", message: localizedErrorMessage(t, error, "liveGuardLoad") });
     }
   }
 
@@ -1143,7 +1780,7 @@ export function App() {
           ...current,
           running: false,
           lastStatus: "unavailable",
-          message: error.message,
+          message: localizedErrorDetail(t, error),
         }));
       }
     }
@@ -1201,7 +1838,7 @@ export function App() {
     } catch (error) {
       setAuditLog({
         entries: [],
-        verification: { valid: false, checked: 0, error: error.message },
+        verification: { valid: false, checked: 0, error: localizedErrorDetail(t, error) },
       });
     }
   }
@@ -1217,7 +1854,7 @@ export function App() {
       setLocalDataStatus({ tone: "success", message: "Loaded" });
     } catch (error) {
       setLocalData(defaultLocalData);
-      setLocalDataStatus({ tone: "danger", message: error.message || "Unavailable" });
+      setLocalDataStatus({ tone: "danger", message: localizedErrorMessage(t, error, "localDataLoad") });
     }
   }
 
@@ -1243,7 +1880,7 @@ export function App() {
           id: "preflight",
           label: "Preflight",
           status: "block",
-          summary: error.message || "unavailable",
+          summary: localizedErrorDetail(t, error),
         }],
       });
     }
@@ -1262,9 +1899,9 @@ export function App() {
       }
     } catch (error) {
       setAIProviders(defaultAIProviders);
-      setAIProvidersStatus({ tone: "danger", message: error.message || "Unavailable" });
+      setAIProvidersStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
       if (!silent) {
-        notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message || "Unavailable" }), "danger");
+        notifyError(notify, t, error, "aiProviders");
       }
     }
   }
@@ -1297,7 +1934,7 @@ export function App() {
       setRiskProfile(profile || defaultRiskProfile);
       setRiskProfileStatus({ tone: "success", message: "Saved" });
     } catch (error) {
-      setRiskProfileStatus({ tone: "danger", message: error.message });
+      setRiskProfileStatus({ tone: "danger", message: localizedErrorMessage(t, error, "riskLoad") });
     }
   }
 
@@ -1319,7 +1956,8 @@ export function App() {
       }));
       await refreshAuditLog();
     } catch (error) {
-      setRiskProfileStatus({ tone: "danger", message: error.message });
+      setRiskProfileStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "riskSave");
     } finally {
       setIsSavingRiskProfile(false);
     }
@@ -1328,10 +1966,10 @@ export function App() {
   async function refreshStrategyProfile() {
     try {
       const profile = await loadStrategyProfile();
-      setStrategyProfile(profile || defaultStrategyProfile);
+      setStrategyProfile(normalizeStrategyProfile(profile));
       setStrategyProfileStatus({ tone: "success", message: "Saved" });
     } catch (error) {
-      setStrategyProfileStatus({ tone: "danger", message: error.message });
+      setStrategyProfileStatus({ tone: "danger", message: localizedErrorMessage(t, error, "strategyLoad") });
     }
   }
 
@@ -1346,27 +1984,31 @@ export function App() {
     setStrategyProfileStatus({ tone: "loading", message: "Saving" });
     try {
       const profile = await saveStrategyProfile(strategyProfile);
-      setStrategyProfile(profile);
+      const normalized = normalizeStrategyProfile(profile);
+      setStrategyProfile(normalized);
       setStrategyProfileStatus({ tone: "success", message: "Saved" });
-      setDataSource(profile.exchange);
+      setDataSource(normalized.exchange);
       setLiveExecutionForm((current) => ({
         ...current,
-        exchange: profile.exchange,
-        symbol: profile.symbol,
-        side: profile.side,
-        sizeUsdt: profile.orderSizeUsdt,
+        exchange: normalized.exchange,
+        symbol: normalized.symbol,
+        side: normalized.side,
+        sizeUsdt: normalized.orderSizeUsdt,
       }));
-      const { data, source } = await loadLabState({ exchange: profile.exchange, symbol: profile.symbol });
+      const { data, source } = await loadLabState({ exchange: normalized.exchange, symbol: normalized.symbol });
       setLabState(data);
-      setMode(data.meta.mode);
+      if (!labModeInitializedRef.current) {
+        setMode(data.meta.mode);
+        labModeInitializedRef.current = true;
+      }
       setSourceStatus(source);
       setBacktestResult(null);
       setBacktestStatus({ tone: "warn", message: "Run needed" });
       await refreshAuditLog();
       notify(t("toast.strategySaved", "Strategy saved"), "success");
     } catch (error) {
-      setStrategyProfileStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setStrategyProfileStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "strategySave");
     } finally {
       setIsSavingStrategyProfile(false);
     }
@@ -1393,8 +2035,8 @@ export function App() {
       await refreshBacktestRuns();
       notify(t("toast.backtestComplete", "Backtest completed"), "success");
     } catch (error) {
-      setBacktestStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setBacktestStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notify(localizedErrorMessage(t, error, "backtest"), "danger");
     } finally {
       setIsRunningBacktest(false);
     }
@@ -1416,8 +2058,8 @@ export function App() {
       setWorkspaceExportStatus({ tone: "success", message: "Saved" });
       notify(t("toast.workspaceExported", "Workspace export downloaded"), "success");
     } catch (error) {
-      setWorkspaceExportStatus({ tone: "danger", message: error.message || "Failed" });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message || "export failed" }), "danger");
+      setWorkspaceExportStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "workspaceExport");
     } finally {
       setIsExportingWorkspace(false);
     }
@@ -1455,8 +2097,8 @@ export function App() {
       await refreshAuditLog();
       notify(t("toast.localDataPruned", "Local research data pruned"), "success");
     } catch (error) {
-      setLocalDataStatus({ tone: "danger", message: error.message || "Failed" });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message || "prune failed" }), "danger");
+      setLocalDataStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "localDataPrune");
       await refreshAuditLog();
       await refreshLocalData();
     } finally {
@@ -1465,8 +2107,10 @@ export function App() {
   }
 
   async function handleKillSwitchToggle() {
+    if (isUpdatingKillSwitch) return;
     const nextAction = killSwitch?.active ? "resume" : "activate";
     const reason = nextAction === "activate" ? "manual stop all from UI" : "manual resume from UI";
+    setIsUpdatingKillSwitch(true);
     setIsStopped(nextAction === "activate");
     try {
       const state = await updateKillSwitch({
@@ -1486,7 +2130,9 @@ export function App() {
       setIsStopped((value) => !value);
       await refreshKillSwitch();
       await refreshPreflight();
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: "kill switch unavailable" }), "danger");
+      notify(t("toast.actionFailed", "Action failed: {message}", { message: statusText(t, "kill switch unavailable") }), "danger");
+    } finally {
+      setIsUpdatingKillSwitch(false);
     }
   }
 
@@ -1551,16 +2197,17 @@ export function App() {
       await refreshPreflight();
       notify(t("toast.autopilotStarted", "Autopilot started"), "success");
     } catch (error) {
+      const message = localizedErrorDetail(t, error);
       setAutopilot((current) => ({
         ...current,
         running: false,
         lastStatus: "failed",
-        lastError: error.message,
-        message: error.message,
+        lastError: message,
+        message,
       }));
       await refreshAuditLog();
       await refreshPreflight();
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      notifyError(notify, t, error, "autopilot");
     } finally {
       setIsUpdatingAutopilot(false);
     }
@@ -1577,8 +2224,8 @@ export function App() {
       await refreshPreflight();
       notify(action === "unlock" ? t("toast.guardUnlocked", "Live Guard updated") : t("toast.guardLocked", "Live Guard locked"), state.unlocked ? "success" : "warn");
     } catch (error) {
-      setLiveGuardStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setLiveGuardStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "liveGuard");
       await refreshLiveGuard();
       await refreshAuditLog();
       await refreshPreflight();
@@ -1615,9 +2262,9 @@ export function App() {
       await refreshPreflight();
       notify(t("toast.executionComplete", "AI execution attempt recorded"), approved ? "success" : "warn");
     } catch (error) {
-      setLiveExecutionStatus({ tone: "danger", message: error.message });
+      setLiveExecutionStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
       setLiveExecutionResult(null);
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      notifyError(notify, t, error, "liveExecute");
       await refreshAuditLog();
       await refreshLiveGuard();
       await refreshLiveExecutions();
@@ -1646,8 +2293,8 @@ export function App() {
       await refreshLiveExecutions();
       notify(t("toast.reconciled", "Reconciliation finished"), "success");
     } catch (error) {
-      setReconciliationStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setReconciliationStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "liveReconcile");
       await refreshAuditLog();
       await refreshLiveReconciliations();
     } finally {
@@ -1693,8 +2340,8 @@ export function App() {
     } catch (error) {
       setAccountSnapshot(null);
       setAccountSnapshotMeta(null);
-      setAccountSyncStatus({ tone: "danger", message: error.message });
-      notify(t("toast.actionFailed", "Action failed: {message}", { message: error.message }), "danger");
+      setAccountSyncStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      notifyError(notify, t, error, "accountSync");
       await refreshAuditLog();
       await refreshPreflight();
     } finally {
@@ -1738,7 +2385,7 @@ export function App() {
     } catch (error) {
       setAccountSnapshot(null);
       setAccountSnapshotMeta(null);
-      setAccountSyncStatus({ tone: "danger", message: error.message });
+      setAccountSyncStatus({ tone: "danger", message: localizedErrorMessage(t, error, "accountSnapshot") });
     }
   }
 
@@ -1757,11 +2404,13 @@ export function App() {
           dataSource={dataSource}
           setDataSource={handleDataSourceChange}
           isStopped={isStopped}
+          isUpdatingKillSwitch={isUpdatingKillSwitch}
           onToggleKillSwitch={handleKillSwitchToggle}
           sourceStatus={sourceStatus}
           credentialCount={credentials.length}
           onOpenCredentials={openCredentialPanel}
           strategyName={strategyProfile.name}
+          modelProfile={strategyProfile.modelProfile}
           onOpenStrategy={() => setIsStrategyPanelOpen(true)}
           onOpenAIConfig={() => setIsAIConfigOpen(true)}
           liveGuard={liveGuard}
@@ -1782,14 +2431,12 @@ export function App() {
           <ExperimentRuns
             t={t}
             runs={labState.runs}
+            defaultModelProfile={strategyProfile.modelProfile}
             selectedRun={selectedRun}
             onSelect={handleRunSelect}
             showArchived={showArchivedRuns}
             onToggleArchived={handleToggleArchivedRuns}
-            onNewRun={() => {
-              setWorkspaceTab("Backtest");
-              notify(t("toast.newRunHint", "Use Backtest or Autopilot to create a new run"), "info");
-            }}
+            onNewRun={handleCreateNewRun}
             onConfigure={() => setIsStrategyPanelOpen(true)}
           />
           <SimulationControls
@@ -1797,15 +2444,20 @@ export function App() {
             meta={labState.meta}
             dataSource={dataSource}
             setDataSource={handleDataSourceChange}
+            marketDataMode={marketDataMode}
+            onMarketDataModeChange={handleMarketDataModeChange}
             timeframe={timeframe}
             onTimeframeChange={handleTimeframeChange}
             isPaused={isPaused}
             isStopped={isStopped || isRunStopped}
             stopLocked={isStopped}
             replaySpeed={replaySpeed}
+            replayPoint={replayPoint}
+            replayOptions={replayOptions}
             onTogglePause={handlePauseToggle}
             onToggleRunStopped={handleRunStopToggle}
             setReplaySpeed={setReplaySpeed}
+            onReplayJump={handleReplayJump}
             onSimStep={handleSimStep}
             onRestart={handleRestartRun}
             onOpenStrategy={() => setIsStrategyPanelOpen(true)}
@@ -1820,7 +2472,9 @@ export function App() {
           />
           <footer className="latency-strip">
             <span>{t("panels.dataLatency", "Data Latency")}</span>
-            <strong>{labState.meta.dataLatencyMs} ms</strong>
+            <strong className={latencyToneClass(labState.meta.dataLatencyMs)}>
+              {labState.meta.dataLatencyMs}<span className="connection-unit">ms</span>
+            </strong>
           </footer>
         </aside>
 
@@ -1841,6 +2495,7 @@ export function App() {
             isRunningBacktest={isRunningBacktest}
             onRunBacktest={handleRunBacktest}
             timeframe={timeframe}
+            marketDataMode={marketDataMode}
             theme={theme}
             onTimeframeChange={handleTimeframeChange}
             onOpenStrategy={() => setIsStrategyPanelOpen(true)}
@@ -1864,6 +2519,12 @@ export function App() {
             setEventFilter={handleEventFilterChange}
             onNotify={notify}
             meta={labState.meta}
+            features={labState.features}
+            verdict={labState.verdict}
+            riskProfile={riskProfile}
+            strategyProfile={strategyProfile}
+            allEvents={labState.events}
+            mode={mode}
             t={t}
           />
         </section>
@@ -1973,18 +2634,28 @@ export function App() {
         isSyncingAccount={isSyncingAccount}
         onNotify={notifyBlocked}
       />
-        <ToastMessage toast={toast} onClose={() => setToast(null)} />
+      <PaperResetDialog
+        t={t}
+        open={isPaperResetConfirmOpen}
+        onClose={handleClosePaperResetConfirm}
+        phrase={paperResetPhrase}
+        setPhrase={setPaperResetPhrase}
+        status={paperResetStatus}
+        isResetting={isResettingPaper}
+        onConfirm={handleConfirmPaperReset}
+      />
+        <ToastMessage t={t} toast={toast} onClose={() => setToast(null)} />
       </main>
     </>
   );
 }
 
-function ToastMessage({ toast, onClose }) {
+function ToastMessage({ t, toast, onClose }) {
   if (!toast) return null;
   return (
     <div className={classNames("toast-message", toast.tone)} role="status" aria-live="polite">
       <span>{toast.message}</span>
-      <button type="button" onClick={onClose} aria-label="Close notification">
+      <button type="button" onClick={onClose} aria-label={t("toast.closeNotification", "Close notification")}>
         <X size={14} />
       </button>
     </div>
@@ -2025,9 +2696,15 @@ function LanguageSwitcher({ t, locale, onChange }) {
 
   function selectLanguage(value) {
     setIsOpen(false);
+    focusMenuTrigger(switcherRef.current);
     if (value !== locale) {
       onChange(resolveLocale(value));
     }
+  }
+
+  function openLanguageMenu() {
+    setIsOpen(true);
+    focusFirstMenuItem(switcherRef.current);
   }
 
   return (
@@ -2039,13 +2716,19 @@ function LanguageSwitcher({ t, locale, onChange }) {
         aria-expanded={isOpen}
         aria-label={t("top.languageSwitch", "Language switch")}
         onClick={() => setIsOpen((value) => !value)}
+        onKeyDown={(event) => handleMenuTriggerKeyDown(event, openLanguageMenu)}
       >
         <Languages size={14} />
         <span>{currentLanguage.label}</span>
         <ChevronDown size={13} />
       </button>
       {isOpen ? (
-        <div className="language-menu" role="listbox" aria-label={t("top.languageSwitch", "Language switch")}>
+        <div
+          className="language-menu"
+          role="listbox"
+          aria-label={t("top.languageSwitch", "Language switch")}
+          onKeyDown={(event) => handleMenuListKeyDown(event, { container: switcherRef.current, closeMenu: () => setIsOpen(false) })}
+        >
           {languageOptions.map((item) => (
             <button
               className={classNames(item.value === locale && "active")}
@@ -2084,6 +2767,7 @@ function CredentialPanel({
   isTesting,
 }) {
   useEscapeToClose(open, onClose);
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   const setField = (field, value) => {
@@ -2103,7 +2787,7 @@ function CredentialPanel({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="credential-modal" role="dialog" aria-modal="true" aria-labelledby="credential-title">
+      <section className="credential-modal" role="dialog" aria-modal="true" aria-labelledby="credential-title" ref={dialogRef}>
         <header className="credential-modal-header">
           <div>
             <h2 id="credential-title">{t("vault.title", "Exchange Vault")}</h2>
@@ -2125,6 +2809,7 @@ function CredentialPanel({
             <label className="field">
               <span>{t("common.exchange", "Exchange")}</span>
               <Segmented
+                label={t("common.exchange", "Exchange")}
                 value={form.exchange}
                 values={["Binance", "OKX"]}
                 onChange={(value) => setField("exchange", value)}
@@ -2135,6 +2820,7 @@ function CredentialPanel({
               <label className="field">
                 <span>{t("common.label", "Label")}</span>
                 <input
+                  aria-label={t("common.label", "Label")}
                   value={form.label}
                   onChange={(event) => setField("label", event.target.value)}
                   placeholder={t("vault.mainKeyPlaceholder", "Main trading key")}
@@ -2143,6 +2829,7 @@ function CredentialPanel({
               <label className="field">
                 <span>{t("vault.vaultPassphrase", "Vault Passphrase")}</span>
                 <input
+                  aria-label={t("vault.vaultPassphrase", "Vault Passphrase")}
                   type="password"
                   value={form.passphrase}
                   onChange={(event) => setField("passphrase", event.target.value)}
@@ -2155,6 +2842,7 @@ function CredentialPanel({
             <label className="field">
               <span>{t("common.apiKey", "API Key")}</span>
               <input
+                aria-label={t("common.apiKey", "API Key")}
                 value={form.apiKey}
                 onChange={(event) => setField("apiKey", event.target.value)}
                 placeholder={t("vault.apiKeyPlaceholder", "Exchange API key")}
@@ -2165,6 +2853,7 @@ function CredentialPanel({
             <label className="field">
               <span>{t("common.apiSecret", "API Secret")}</span>
               <input
+                aria-label={t("common.apiSecret", "API Secret")}
                 type="password"
                 value={form.secret}
                 onChange={(event) => setField("secret", event.target.value)}
@@ -2176,6 +2865,7 @@ function CredentialPanel({
             <label className="field">
               <span>{form.exchange === "OKX" ? t("vault.okxPassphrase", "OKX API Passphrase") : t("vault.optionalPassphrase", "API Passphrase (optional)")}</span>
               <input
+                aria-label={form.exchange === "OKX" ? t("vault.okxPassphrase", "OKX API Passphrase") : t("vault.optionalPassphrase", "API Passphrase (optional)")}
                 type="password"
                 value={form.apiPassphrase}
                 onChange={(event) => setField("apiPassphrase", event.target.value)}
@@ -2186,13 +2876,14 @@ function CredentialPanel({
 
             <div className="permission-stack">
               <label className="permission-row">
-                <input type="checkbox" checked readOnly />
+                <input type="checkbox" aria-label={t("common.read", "Read")} checked readOnly />
                 <span>{t("common.read", "Read")}</span>
                 <strong>{t("common.required", "Required")}</strong>
               </label>
               <label className="permission-row">
                 <input
                   type="checkbox"
+                  aria-label={t("common.trade", "Trade")}
                   checked={form.permissions.trade}
                   onChange={(event) => setPermission("trade", event.target.checked)}
                 />
@@ -2200,7 +2891,7 @@ function CredentialPanel({
                 <strong>{t("common.allowed", "Allowed")}</strong>
               </label>
               <label className="permission-row blocked">
-                <input type="checkbox" checked={false} disabled readOnly />
+                <input type="checkbox" aria-label={t("common.withdraw", "Withdraw")} checked={false} disabled readOnly />
                 <span>{t("common.withdraw", "Withdraw")}</span>
                 <strong>{t("common.blockedUpper", "Blocked")}</strong>
               </label>
@@ -2254,6 +2945,7 @@ function CredentialPanel({
               <label className="field">
                 <span>{t("vault.credential", "Credential")}</span>
                 <select
+                  aria-label={t("vault.credential", "Credential")}
                   value={testForm.credentialId}
                   onChange={(event) => {
                     const credential = credentials.find((item) => String(item.id) === event.target.value);
@@ -2279,9 +2971,10 @@ function CredentialPanel({
                 <label className="field">
                   <span>{t("common.environment", "Environment")}</span>
                   {selectedTestCredential?.exchange === "OKX" ? (
-                    <input value="demo" readOnly />
+                    <input aria-label={t("common.environment", "Environment")} value="demo" readOnly />
                   ) : (
                     <Segmented
+                      label={t("common.environment", "Environment")}
                       value={testEnvironment}
                       values={["testnet", "demo"]}
                       onChange={(value) => setTestField("environment", value)}
@@ -2291,6 +2984,7 @@ function CredentialPanel({
                 <label className="field">
                   <span>{t("common.symbol", "Symbol")}</span>
                   <input
+                    aria-label={t("common.symbol", "Symbol")}
                     value={testForm.symbol}
                     onChange={(event) => setTestField("symbol", event.target.value.toUpperCase())}
                     placeholder="BTCUSDT"
@@ -2300,6 +2994,7 @@ function CredentialPanel({
               <label className="field">
                 <span>{t("vault.vaultPassphrase", "Vault Passphrase")}</span>
                 <input
+                  aria-label={t("vault.vaultPassphrase", "Vault Passphrase")}
                   type="password"
                   value={testForm.passphrase}
                   onChange={(event) => setTestField("passphrase", event.target.value)}
@@ -2341,11 +3036,13 @@ function CredentialPanel({
 
 function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, isSaving }) {
   useEscapeToClose(open, onClose);
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
+  const activeProfile = normalizeStrategyProfile(profile);
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="credential-modal strategy-modal" role="dialog" aria-modal="true" aria-labelledby="strategy-title">
+      <section className="credential-modal strategy-modal" role="dialog" aria-modal="true" aria-labelledby="strategy-title" ref={dialogRef}>
         <header className="credential-modal-header">
           <div>
             <h2 id="strategy-title">{t("strategy.title", "Strategy Profile")}</h2>
@@ -2375,6 +3072,7 @@ function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, is
             <label className="field">
               <span>{t("common.exchange", "Exchange")}</span>
               <Segmented
+                label={t("common.exchange", "Exchange")}
                 value={profile.exchange}
                 values={["Binance", "OKX"]}
                 onChange={(value) => setField("exchange", value)}
@@ -2393,7 +3091,43 @@ function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, is
             </label>
             <label className="field">
               <span>{t("common.side", "Side")}</span>
-              <Segmented value={profile.side} values={["buy", "sell"]} onChange={(value) => setField("side", value)} labelFor={(item) => choiceLabel(t, item)} />
+              <Segmented
+                label={t("common.side", "Side")}
+                value={profile.side}
+                values={["buy", "sell"]}
+                onChange={(value) => setField("side", value)}
+                labelFor={(item) => choiceLabel(t, item)}
+              />
+            </label>
+          </div>
+
+          <div className="form-title compact">
+            <Brain size={15} />
+            <strong>{t("strategy.routing", "Model Routing")}</strong>
+          </div>
+
+          <div className="field-grid">
+            <label className="field">
+              <span>{t("strategy.modelRoute", "Model Route")}</span>
+              <select
+                value={activeProfile.modelProfile}
+                onChange={(event) => setField("modelProfile", event.target.value)}
+              >
+                {strategyModelRoutes.map((route) => (
+                  <option key={route.value} value={route.value}>{modelRouteLabel(t, route.value)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>{t("strategy.fallbackRoute", "Fallback Route")}</span>
+              <select
+                value={activeProfile.modelFallback}
+                onChange={(event) => setField("modelFallback", event.target.value)}
+              >
+                {strategyModelRoutes.map((route) => (
+                  <option key={route.value} value={route.value}>{modelRouteLabel(t, route.value)}</option>
+                ))}
+              </select>
             </label>
           </div>
 
@@ -2426,13 +3160,37 @@ function StrategyPanel({ t, open, onClose, profile, status, setField, onSave, is
                 onChange={(event) => setField("maxSteps", Number(event.target.value))}
               />
             </label>
+            <label className="field">
+              <span>{t("strategy.concurrentWorkers", "Concurrent Workers")}</span>
+              <input
+                type="number"
+                min="1"
+                max="8"
+                value={activeProfile.concurrency}
+                onChange={(event) => setField("concurrency", Number(event.target.value))}
+              />
+            </label>
+          </div>
+
+          <div className="strategy-topology" aria-label={t("strategy.topology", "Strategy execution topology")}>
+            <span>{t("strategy.topologyStrategy", "Strategy Instance")}</span>
+            <i>&gt;</i>
+            <span>{t("strategy.topologyModel", "Model Route")}</span>
+            <i>&gt;</i>
+            <span>{t("strategy.topologyRisk", "Risk Guard")}</span>
+            <i>&gt;</i>
+            <span>{t("strategy.topologyExecution", "Order Router")}</span>
           </div>
 
           <div className="strategy-summary">
             <span>{t("strategy.simulation", "Simulation")}</span>
             <strong>{profile.exchange} / {profile.symbol}</strong>
+            <span>{t("strategy.modelRoute", "Model Route")}</span>
+            <strong>{modelRouteLabel(t, activeProfile.modelProfile)}</strong>
             <span>{t("common.intent", "Intent")}</span>
             <strong>{choiceLabel(t, profile.side)} {Number(profile.orderSizeUsdt || 0).toFixed(0)} USDT</strong>
+            <span>{t("strategy.concurrency", "Concurrency")}</span>
+            <strong>{t("strategy.concurrentRuns", "{count} workers", { count: activeProfile.concurrency })}</strong>
             <span>{t("strategy.autopilot", "Autopilot")}</span>
             <strong>{profile.intervalSeconds}s / {profile.maxSteps > 0 ? t("strategy.steps", "{count} steps", { count: profile.maxSteps }) : t("strategy.unlimited", "unlimited")}</strong>
           </div>
@@ -2475,6 +3233,7 @@ function AIConfigPanel({
   onCopyCommand,
 }) {
   useEscapeToClose(open, onClose);
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   const providerCards = (providers?.providers?.length ? providers.providers : defaultAIProviders.providers)
@@ -2486,6 +3245,9 @@ function AIConfigPanel({
       stateLabel: t(`aiConfig.providerStates.${provider.state}`, provider.state || "-"),
       tone: providerStateTone(provider.state),
     }));
+  const activeProfile = normalizeStrategyProfile(strategyProfile);
+  const activeRouteLabel = modelRouteLabel(t, activeProfile.modelProfile);
+  const fallbackRouteLabel = modelRouteLabel(t, activeProfile.modelFallback);
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -2494,6 +3256,7 @@ function AIConfigPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="ai-config-title"
+        ref={dialogRef}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="credential-modal-header">
@@ -2516,21 +3279,43 @@ function AIConfigPanel({
           <div className="ai-active-card">
             <div>
               <span>{t("aiConfig.activeRoute", "Active Route")}</span>
-              <strong>{meta?.model || "Local AI Policy v0.2.0"}</strong>
-              <small>{t("aiConfig.localActiveBody", "The first release executes deterministic local policy decisions by default. No external model call is required for Shadow/Paper/guarded Live validation.")}</small>
+              <strong>{activeRouteLabel}</strong>
+              <small>{t("aiConfig.activeRouteBody", "This is the default model route for the current strategy profile. Failed or unavailable assisted routes fall back before orders reach the risk guard.")}</small>
             </div>
             <code>{t("aiConfig.active", "ACTIVE")}</code>
           </div>
 
+          <div className="ai-route-map" aria-label={t("aiConfig.routeMap", "Strategy model route map")}>
+            <div className="route-step">
+              <span>{t("aiConfig.routeStrategy", "Strategy")}</span>
+              <strong>{activeProfile.name || meta?.strategy || "-"}</strong>
+            </div>
+            <i>&gt;</i>
+            <div className="route-step">
+              <span>{t("aiConfig.routeModel", "Model")}</span>
+              <strong>{activeRouteLabel}</strong>
+            </div>
+            <i>&gt;</i>
+            <div className="route-step">
+              <span>{t("aiConfig.routeFallback", "Fallback")}</span>
+              <strong>{fallbackRouteLabel}</strong>
+            </div>
+            <i>&gt;</i>
+            <div className="route-step">
+              <span>{t("aiConfig.routeExecution", "Execution")}</span>
+              <strong>{t("aiConfig.guardedExecution", "Guarded order router")}</strong>
+            </div>
+          </div>
+
           <div className="ai-config-summary">
             <span>{t("aiConfig.strategy", "Strategy")}</span>
-            <strong>{strategyProfile?.name || meta?.strategy || "-"}</strong>
+            <strong>{activeProfile.name || meta?.strategy || "-"}</strong>
             <span>{t("common.intent", "Intent")}</span>
-            <strong>{String(strategyProfile?.side || "buy").toUpperCase()} {formatMoney(Number(strategyProfile?.orderSizeUsdt || 0))} USDT</strong>
+            <strong>{String(activeProfile.side || "buy").toUpperCase()} {formatMoney(Number(activeProfile.orderSizeUsdt || 0))} USDT</strong>
             <span>{t("common.risk", "Risk")}</span>
             <strong>{formatMoney(Number(riskProfile?.maxOrderUsdt || 0))} USDT / {Number(riskProfile?.minConfidence || 0).toFixed(2)}</strong>
-            <span>{t("panels.currentSignal", "Current Signal")}</span>
-            <strong>{verdict?.signal || "-"} / {verdict?.confidence || "-"}%</strong>
+            <span>{t("strategy.concurrency", "Concurrency")}</span>
+            <strong>{t("strategy.concurrentRuns", "{count} workers", { count: activeProfile.concurrency })}</strong>
           </div>
 
           <div className="ai-provider-grid">
@@ -2622,6 +3407,7 @@ function LiveGuardPanel({
   onNotify,
 }) {
   useEscapeToClose(open, onClose);
+  const dialogRef = useDialogFocus(open);
   if (!open) return null;
 
   const setField = (field, value) => {
@@ -2773,7 +3559,7 @@ function LiveGuardPanel({
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="credential-modal live-guard-modal" role="dialog" aria-modal="true" aria-labelledby="live-guard-title">
+      <section className="credential-modal live-guard-modal" role="dialog" aria-modal="true" aria-labelledby="live-guard-title" ref={dialogRef}>
         <header className="credential-modal-header">
           <div>
             <h2 id="live-guard-title">{t("guard.title", "Live Guard")}</h2>
@@ -2808,6 +3594,7 @@ function LiveGuardPanel({
                 <label>
                   <span>{t("guard.maxOrder", "Max Order")}</span>
                   <input
+                    aria-label={t("guard.maxOrder", "Max Order")}
                     type="number"
                     min="1"
                     value={riskProfile.maxOrderUsdt}
@@ -2817,6 +3604,7 @@ function LiveGuardPanel({
                 <label>
                   <span>{t("guard.totalExposure", "Total Exp.")}</span>
                   <input
+                    aria-label={t("guard.totalExposure", "Total Exp.")}
                     type="number"
                     min="1"
                     value={riskProfile.maxTotalExposureUsdt}
@@ -2826,6 +3614,7 @@ function LiveGuardPanel({
                 <label>
                   <span>{t("guard.dailyDd", "Daily DD %")}</span>
                   <input
+                    aria-label={t("guard.dailyDd", "Daily DD %")}
                     type="number"
                     min="0.1"
                     step="0.1"
@@ -2836,6 +3625,7 @@ function LiveGuardPanel({
                 <label>
                   <span>{t("guard.minConfidence", "Min Conf.")}</span>
                   <input
+                    aria-label={t("guard.minConfidence", "Min Conf.")}
                     type="number"
                     min="0.1"
                     max="1"
@@ -2847,6 +3637,7 @@ function LiveGuardPanel({
                 <label>
                   <span>{t("guard.spread", "Spread %")}</span>
                   <input
+                    aria-label={t("guard.spread", "Spread %")}
                     type="number"
                     min="0.001"
                     step="0.001"
@@ -2857,6 +3648,7 @@ function LiveGuardPanel({
                 <label>
                   <span>{t("guard.losses", "Losses")}</span>
                   <input
+                    aria-label={t("guard.losses", "Losses")}
                     type="number"
                     min="1"
                     value={riskProfile.maxConsecutiveLosses}
@@ -2874,6 +3666,7 @@ function LiveGuardPanel({
               <label className="field">
                 <span>{t("common.operator", "Operator")}</span>
                 <input
+                  aria-label={t("common.operator", "Operator")}
                   value={form.operator}
                   onChange={(event) => setField("operator", event.target.value)}
                   placeholder="local"
@@ -2882,6 +3675,7 @@ function LiveGuardPanel({
               <label className="field">
                 <span>{t("common.environment", "Environment")}</span>
                 <Segmented
+                  label={t("common.environment", "Environment")}
                   value={form.environment}
                   values={["testnet", "demo"]}
                   onChange={(value) => setField("environment", value)}
@@ -2893,6 +3687,7 @@ function LiveGuardPanel({
               <label className="field">
                 <span>{t("guard.ttlSeconds", "TTL Seconds")}</span>
                 <input
+                  aria-label={t("guard.ttlSeconds", "TTL Seconds")}
                   type="number"
                   min="60"
                   max="900"
@@ -2903,6 +3698,7 @@ function LiveGuardPanel({
               <label className="field">
                 <span>{t("guard.maxOrderUsdt", "Max Order USDT")}</span>
                 <input
+                  aria-label={t("guard.maxOrderUsdt", "Max Order USDT")}
                   type="number"
                   min="1"
                   value={form.maxOrderUsdt}
@@ -2914,6 +3710,7 @@ function LiveGuardPanel({
             <label className="field">
               <span>{t("guard.unlockPhrase", "Unlock Phrase")}</span>
               <input
+                aria-label={t("guard.unlockPhrase", "Unlock Phrase")}
                 value={form.phrase}
                 onChange={(event) => setField("phrase", event.target.value)}
                 placeholder={t("guard.unlockPhrasePlaceholder", "ENABLE TESTNET LIVE")}
@@ -2924,6 +3721,7 @@ function LiveGuardPanel({
             <label className="field">
               <span>{t("common.reason", "Reason")}</span>
               <input
+                aria-label={t("common.reason", "Reason")}
                 value={form.reason}
                 onChange={(event) => setField("reason", event.target.value)}
                 placeholder={t("guard.reasonPlaceholder", "testnet validation only")}
@@ -2998,6 +3796,7 @@ function LiveGuardPanel({
             <label className="field">
               <span>{t("guard.credential", "Credential")}</span>
               <select
+                aria-label={t("guard.credential", "Credential")}
                 value={executionForm.credentialId}
                 onChange={(event) => {
                   const credential = credentials.find((item) => String(item.id) === event.target.value);
@@ -3023,11 +3822,12 @@ function LiveGuardPanel({
             <div className="field-grid">
               <label className="field">
                 <span>{t("common.exchange", "Exchange")}</span>
-                <input value={executionForm.exchange} readOnly />
+                <input aria-label={t("common.exchange", "Exchange")} value={executionForm.exchange} readOnly />
               </label>
               <label className="field">
                 <span>{t("common.symbol", "Symbol")}</span>
                 <input
+                  aria-label={t("common.symbol", "Symbol")}
                   value={executionForm.symbol}
                   onChange={(event) => setExecutionField("symbol", event.target.value.toUpperCase())}
                   placeholder="BTCUSDT"
@@ -3039,6 +3839,7 @@ function LiveGuardPanel({
               <label className="field">
                 <span>{t("common.side", "Side")}</span>
                 <Segmented
+                  label={t("common.side", "Side")}
                   value={executionForm.side}
                   values={["buy", "sell"]}
                   onChange={(value) => setExecutionField("side", value)}
@@ -3048,6 +3849,7 @@ function LiveGuardPanel({
               <label className="field">
                 <span>{t("guard.sizeUsdt", "Size USDT")}</span>
                 <input
+                  aria-label={t("guard.sizeUsdt", "Size USDT")}
                   type="number"
                   min="1"
                   value={executionForm.sizeUsdt}
@@ -3059,6 +3861,7 @@ function LiveGuardPanel({
             <label className="field">
               <span>{t("vault.vaultPassphrase", "Vault Passphrase")}</span>
               <input
+                aria-label={t("vault.vaultPassphrase", "Vault Passphrase")}
                 type="password"
                 value={executionForm.passphrase}
                 onChange={(event) => setExecutionField("passphrase", event.target.value)}
@@ -3070,6 +3873,7 @@ function LiveGuardPanel({
             <label className="permission-row execute-toggle">
               <input
                 type="checkbox"
+                aria-label={t("guard.validationOnly", "Validation Only")}
                 checked={executionForm.validationOnly}
                 onChange={(event) => setExecutionField("validationOnly", event.target.checked)}
               />
@@ -3186,6 +3990,7 @@ function LiveGuardPanel({
               </div>
               <div className="local-data-actions">
                 <input
+                  aria-label={t("guard.prunePlaceholder", "PRUNE LOCAL DATA")}
                   value={localDataPhrase}
                   onChange={(event) => setLocalDataPhrase(event.target.value)}
                   placeholder={t("guard.prunePlaceholder", "PRUNE LOCAL DATA")}
@@ -3324,11 +4129,13 @@ function TopBar({
   dataSource,
   setDataSource,
   isStopped,
+  isUpdatingKillSwitch,
   onToggleKillSwitch,
   sourceStatus,
   credentialCount,
   onOpenCredentials,
   strategyName,
+  modelProfile,
   onOpenStrategy,
   onOpenAIConfig,
   liveGuard,
@@ -3340,6 +4147,7 @@ function TopBar({
       <div className="top-section source-section">
         <span className="label">{t("top.dataSource", "Data Source")}</span>
         <Segmented
+          label={t("top.dataSource", "Data Source")}
           value={dataSource}
           values={["Binance", "OKX"]}
           onChange={setDataSource}
@@ -3350,13 +4158,14 @@ function TopBar({
       <div className="top-section mode-section">
         <span className="label">{t("top.mode", "Mode")}</span>
         <Segmented
+          label={t("top.mode", "Mode")}
           value={mode}
           values={["Shadow", "Paper", "Live"]}
           onChange={setMode}
           tone={modeTone}
           labelFor={(item) => choiceLabel(t, item)}
         />
-        <button className="guard-link" type="button" onClick={onOpenLiveGuard}>
+        <button className="guard-link" type="button" onClick={onOpenLiveGuard} aria-label={t("guard.title", "Live Guard")}>
           <LockKeyhole size={11} />
           {t("top.guard", "Guard")}
           <strong className={liveGuard?.unlocked ? "success-text" : "warn-text"}>
@@ -3374,9 +4183,9 @@ function TopBar({
       </div>
 
       <div className="top-section model-section">
-        <span className="label">{t("top.model", "Model")}</span>
+        <span className="label">{t("top.defaultRoute", "Default Route")}</span>
         <button className="model-pill model-config-button" type="button" onClick={onOpenAIConfig} title={t("aiConfig.title", "AI Configuration")}>
-          <span>{meta.model}</span>
+          <span>{modelRouteLabel(t, modelProfile) || meta.model}</span>
           <i />
         </button>
       </div>
@@ -3385,7 +4194,22 @@ function TopBar({
       <MetricTile label={t("top.dailyPnl", "Daily PnL")} value={`+${formatMoney(meta.dailyPnl)}`} unit="USDT" sub={`+${meta.dailyPnlPct.toFixed(2)}%`} tone="positive" density="wide" />
       <MetricTile label={t("top.dailyDrawdown", "Daily Drawdown")} value={`${meta.dailyDrawdown.toFixed(2)}%`} tone="negative" />
 
-      <button className={classNames("stop-all", isStopped && "active")} type="button" onClick={onToggleKillSwitch} title={killSwitch?.message}>
+      <button
+        className={classNames("stop-all", isStopped && "active")}
+        type="button"
+        onClick={onToggleKillSwitch}
+        disabled={isUpdatingKillSwitch}
+        aria-busy={isUpdatingKillSwitch}
+        title={statusText(t, killSwitch?.message)}
+        aria-pressed={isStopped}
+        aria-label={
+          isUpdatingKillSwitch
+            ? t("top.updatingKillSwitch", "Updating Kill Switch")
+            : isStopped
+              ? t("top.resumeKillSwitch", "Resume Kill Switch")
+              : t("top.activateKillSwitch", "Activate Kill Switch")
+        }
+      >
         {isStopped ? <Play size={16} /> : <Square size={16} />}
         <span>{isStopped ? t("top.resume", "RESUME") : t("top.stopAll", "STOP ALL")}</span>
         <small>{t("top.killSwitch", "Kill Switch")}</small>
@@ -3393,11 +4217,19 @@ function TopBar({
 
       <div className="connection">
         <span className="label">{t("top.connection", "Connection")}</span>
-        <div><i className="dot success" /> {dataSource} <strong>{meta.dataLatencyMs} ms</strong></div>
-        <div><i className={classNames("dot", sourceStatus === "api" ? "success" : "warn")} /> {t("top.localApi", "Local API")} <strong>{sourceStatus}</strong></div>
-        <button className="connection-link" type="button" onClick={onOpenCredentials}>
+        <div>
+          <i className="dot success" />
+          <span className="connection-name">{dataSource}</span>
+          <strong className={latencyToneClass(meta.dataLatencyMs)}>{meta.dataLatencyMs}<span className="connection-unit">ms</span></strong>
+        </div>
+        <div>
+          <i className={classNames("dot", sourceStatus === "api" ? "success" : "warn")} />
+          <span className="connection-name">{t("top.localApi", "Local API")}</span>
+          <strong className={sourceStatus === "api" ? "success-text" : "warn-text"}>{sourceStatusText(t, sourceStatus)}</strong>
+        </div>
+        <button className="connection-link connection-vault-link" type="button" onClick={onOpenCredentials} aria-label={t("vault.title", "Exchange Vault")}>
           <ShieldCheck size={12} />
-          {t("top.vault", "Vault")}
+          <span className="connection-name">{t("top.vault", "Vault")}</span>
           <strong>{credentialCount}</strong>
         </button>
       </div>
@@ -3405,15 +4237,25 @@ function TopBar({
   );
 }
 
-function Segmented({ value, values, onChange, icon, tone, labelFor }) {
+function Segmented({ value, values, onChange, icon, tone, labelFor, label }) {
   return (
-    <div className={classNames("segmented", tone && `tone-${tone}`)}>
-      {values.map((item) => (
-        <button key={item} type="button" className={value === item ? "active" : ""} aria-pressed={value === item} onClick={() => onChange(item)}>
-          {icon && item === value ? icon : null}
-          {labelFor ? labelFor(item) : item}
-        </button>
-      ))}
+    <div className={classNames("segmented", tone && `tone-${tone}`)} role="group" aria-label={label}>
+      {values.map((item) => {
+        const displayLabel = labelFor ? labelFor(item) : item;
+        return (
+          <button
+            key={item}
+            type="button"
+            className={value === item ? "active" : ""}
+            aria-label={label ? `${label}: ${displayLabel}` : displayLabel}
+            aria-pressed={value === item}
+            onClick={() => onChange(item)}
+          >
+            {icon && item === value ? icon : null}
+            {displayLabel}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -3431,60 +4273,107 @@ function MetricTile({ label, value, unit, sub, tone, density }) {
   );
 }
 
-function ExperimentRuns({ t, runs, selectedRun, onSelect, showArchived, onToggleArchived, onNewRun, onConfigure }) {
+function ExperimentRuns({ t, runs, defaultModelProfile, selectedRun, onSelect, showArchived, onToggleArchived, onNewRun, onConfigure }) {
+  const archivedCount = 12;
+
   return (
-    <section className="panel runs-panel">
+    <section className={classNames("panel runs-panel", showArchived && "archive-open")}>
       <div className="panel-header">
         <h2>{t("panels.experimentRuns", "Experiment Runs")}</h2>
         <div className="icon-row">
-          <button type="button" onClick={onNewRun} title={t("panels.newRun", "New run")}>
+          <button type="button" onClick={onNewRun} title={t("panels.newRun", "New run")} aria-label={t("panels.newRun", "New run")}>
             <Plus size={14} />
           </button>
-          <button type="button" onClick={onConfigure} title={t("panels.configureStrategy", "Configure strategy")}>
+          <button className="strategy-config-trigger" type="button" onClick={onConfigure} title={t("panels.configureStrategy", "Configure strategy")} aria-label={t("panels.configureStrategy", "Configure strategy")}>
             <SlidersHorizontal size={14} />
           </button>
         </div>
       </div>
       <div className="runs-head">
         <span>{t("panels.strategyRun", "Strategy / Run")}</span>
+        <span>{t("panels.modelRoute", "Model")}</span>
         <span>{t("common.status", "Status")}</span>
         <span>{t("panels.return7d", "Ret. 7D")}</span>
         <span>{t("panels.maxDd", "Max DD")}</span>
-        <span>{t("panels.win", "Win")}</span>
         <span>{t("panels.last", "Last")}</span>
       </div>
       <div className="run-list">
-        {runs.map((run, index) => (
-          <button
-            className={classNames("run-row", index === selectedRun && "selected")}
-            key={`${run.name}-${run.run}`}
-            onClick={() => onSelect(index)}
-            title={`${run.name} ${run.version} - ${run.run} / ${run.status} / Last ${run.lastRun}`}
-            aria-label={`${run.name} ${run.version} ${run.run}, ${run.status}, return ${run.return7d.toFixed(2)} percent, max drawdown ${run.maxDd.toFixed(2)} percent, win rate ${run.winRate.toFixed(1)} percent, last run ${run.lastRun}`}
-          >
-            <span className="run-name">
-              <strong>{run.name}</strong>
-              <small>{run.version} - {run.run}</small>
-            </span>
-            <StatusPill t={t} status={run.status} />
-            <ValueCell value={run.return7d} suffix="%" />
-            <ValueCell value={run.maxDd} suffix="%" />
-            <span>{run.winRate.toFixed(1)}%</span>
-            <span>{run.lastRun}</span>
-          </button>
-        ))}
+        {runs.map((run, index) => {
+          const route = runModelProfile(run, index, defaultModelProfile || defaultStrategyProfile.modelProfile);
+          return (
+            <button
+              className={classNames("run-row", index === selectedRun && "selected", run.status?.toLowerCase() === "running" && "running")}
+              key={`${run.name}-${run.run}`}
+              onClick={() => onSelect(index)}
+              title={t("panels.runTitle", "{name} {version} - {run} / {route} / {status} / Last {last}", {
+                name: run.name,
+                version: run.version,
+                run: run.run,
+                route: modelRouteLabel(t, route),
+                status: choiceLabel(t, run.status),
+                last: run.lastRun,
+              })}
+              aria-label={t("panels.runAria", "{name} {version} {run}, {route}, {status}, return {return7d} percent, max drawdown {maxDd} percent, last run {last}", {
+                name: run.name,
+                version: run.version,
+                run: run.run,
+                route: modelRouteLabel(t, route),
+                status: choiceLabel(t, run.status),
+                return7d: run.return7d.toFixed(2),
+                maxDd: run.maxDd.toFixed(2),
+                last: run.lastRun,
+              })}
+            >
+              <span className="run-name">
+                <strong>{run.name}</strong>
+                <small>{run.version} - {run.run}</small>
+              </span>
+              <ModelBadge t={t} value={route} />
+              <StatusPill t={t} status={run.status} />
+              <ValueCell value={run.return7d} suffix="%" />
+              <ValueCell value={run.maxDd} suffix="%" />
+              <span>{run.lastRun}</span>
+            </button>
+          );
+        })}
       </div>
+      <button
+        className={classNames("archive-row", showArchived && "open")}
+        type="button"
+        onClick={onToggleArchived}
+        aria-expanded={showArchived}
+        aria-controls="archived-runs-summary"
+        aria-label={t("panels.archivedAria", "{title}, {count} saved runs", {
+          title: t("panels.archivedTitle", "Archived runs"),
+          count: archivedCount,
+        })}
+        title={t("panels.archivedAria", "{title}, {count} saved runs", {
+          title: t("panels.archivedTitle", "Archived runs"),
+          count: archivedCount,
+        })}
+      >
+        <span className="archive-row-copy">
+          <span>{t("panels.archivedTitle", "Archived runs")}</span>
+        </span>
+        <span className="archive-row-meta">
+          <strong className="archive-count">{archivedCount}</strong>
+          <ChevronDown size={13} />
+        </span>
+      </button>
       {showArchived ? (
-        <div className="archive-drawer">
+        <div className="archive-drawer" id="archived-runs-summary" role="region" aria-label={t("panels.archivedTitle", "Archived runs")}>
           <span>{t("panels.archivedReady", "Archived runs are retained in local history")}</span>
-          <strong>12</strong>
         </div>
       ) : null}
-      <button className={classNames("archive-row", showArchived && "open")} type="button" onClick={onToggleArchived}>
-        {t("panels.archived", "Archived ({count})", { count: 12 })}
-        <ChevronDown size={14} />
-      </button>
     </section>
+  );
+}
+
+function ModelBadge({ t, value }) {
+  return (
+    <span className={classNames("model-badge", `route-${modelRouteMeta(value).value}`)} title={modelRouteLabel(t, value)}>
+      {modelRouteBadge(t, value)}
+    </span>
   );
 }
 
@@ -3501,6 +4390,8 @@ function SimulationControls({
   meta,
   dataSource,
   setDataSource,
+  marketDataMode,
+  onMarketDataModeChange,
   timeframe,
   onTimeframeChange,
   mode,
@@ -3508,9 +4399,12 @@ function SimulationControls({
   isStopped,
   stopLocked = false,
   replaySpeed,
+  replayPoint,
+  replayOptions = [],
   onTogglePause,
   onToggleRunStopped,
   setReplaySpeed,
+  onReplayJump,
   onSimStep,
   onRestart,
   onOpenStrategy,
@@ -3526,9 +4420,9 @@ function SimulationControls({
   const autoTone = autopilot?.running ? "success" : autopilot?.lastStatus === "failed" ? "danger" : "warn";
   const autoBlocked = !autopilot?.running && (stopLocked || (mode === "Live" && !liveReady));
   const autoDisabledReason = stopLocked
-    ? t("panels.killActive", "KILL ACTIVE")
+    ? t("toast.killSwitchBlocksAuto", "Resume the Kill Switch before starting Autopilot")
     : mode === "Live" && !liveReady
-      ? t("guard.liveSetup", "Live Setup")
+      ? t("toast.liveSetupRequired", "Complete Live Setup before starting Live Autopilot")
       : "";
   const latestAutoRun = autopilotRuns?.[0];
   const currentRunId = autopilot?.runId || latestAutoRun?.id;
@@ -3542,6 +4436,40 @@ function SimulationControls({
     const index = chartTimeframes.indexOf(timeframe);
     onTimeframeChange(chartTimeframes[(index + 1) % chartTimeframes.length]);
   };
+  const [isDataOpen, setIsDataOpen] = useState(false);
+  const [isJumpOpen, setIsJumpOpen] = useState(false);
+  const dataSelectRef = useRef(null);
+  const jumpSelectRef = useRef(null);
+  const dataLabel = marketDataModeShortLabel(t, marketDataMode);
+  const jumpLabel = replayPoint?.label || t("panels.noReplayPoints", "No replay points");
+  const jumpDisabledReason = replayOptions.length === 0
+    ? t("toast.jumpHint", "Jump-to-time uses replay history; choose a backtest or run AI step first")
+    : "";
+  const openDataMenu = () => {
+    setIsDataOpen(true);
+    focusFirstMenuItem(dataSelectRef.current);
+  };
+  const openJumpMenu = () => {
+    if (jumpDisabledReason) {
+      onActionNotice(t("panels.jumpTo", "Jump To"), jumpDisabledReason);
+      return;
+    }
+    setIsJumpOpen(true);
+    focusFirstMenuItem(jumpSelectRef.current);
+  };
+  useDismissOnOutside(isDataOpen, dataSelectRef, () => setIsDataOpen(false));
+  useDismissOnOutside(isJumpOpen, jumpSelectRef, () => setIsJumpOpen(false));
+  useEffect(() => {
+    if (!isDataOpen && !isJumpOpen) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsDataOpen(false);
+        setIsJumpOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isDataOpen, isJumpOpen]);
   return (
     <section className="panel controls-panel">
       <div className="panel-header">
@@ -3550,7 +4478,7 @@ function SimulationControls({
       <div className="control-grid">
         <label>
           <span>{t("common.market", "Market")}</span>
-          <button className="select-button compact" type="button" onClick={cycleExchange}>
+          <button className="select-button compact" type="button" onClick={cycleExchange} title={t("panels.switchExchange", "Switch exchange")} aria-label={t("panels.switchExchange", "Switch exchange")}>
             {dataSource}<ChevronDown size={13} />
           </button>
         </label>
@@ -3562,19 +4490,59 @@ function SimulationControls({
         </label>
         <label>
           <span>{t("common.timeframe", "Timeframe")}</span>
-          <button className="select-button compact" type="button" onClick={cycleTimeframe}>
+          <button className="select-button compact" type="button" onClick={cycleTimeframe} title={t("panels.switchTimeframe", "Switch timeframe")} aria-label={t("panels.switchTimeframe", "Switch timeframe")}>
             {timeframe}<ChevronDown size={13} />
           </button>
         </label>
-        <label>
+        <label className="control-select-label">
           <span>{t("common.data", "Data")}</span>
-          <button
-            className="select-button compact"
-            type="button"
-            onClick={() => onActionNotice(t("common.data", "Data"), t("toast.dataSourceHint", "Public market data refreshes automatically; switch exchange from the Market control"))}
+          <div
+            className="data-select"
+            ref={dataSelectRef}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setIsDataOpen(false);
+              }
+            }}
+            onKeyDown={(event) => {
+              handleMenuListKeyDown(event, { container: dataSelectRef.current, closeMenu: () => setIsDataOpen(false) });
+            }}
           >
-            {t("common.live", "Live")}<ChevronDown size={13} />
-          </button>
+            <button
+              className="select-button compact"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={isDataOpen}
+              title={marketDataModeDetail(t, marketDataMode)}
+              onClick={() => setIsDataOpen((value) => !value)}
+              onKeyDown={(event) => handleMenuTriggerKeyDown(event, openDataMenu)}
+            >
+              <Database size={13} />
+              <strong>{dataLabel}</strong>
+              <ChevronDown size={13} />
+            </button>
+            {isDataOpen ? (
+              <div className="data-menu" role="menu">
+                {marketDataModes.map((option) => (
+                  <button
+                    key={option.value}
+                    className={option.value === marketDataMode ? "active" : ""}
+                    type="button"
+                    role="menuitem"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      onMarketDataModeChange(option.value);
+                      setIsDataOpen(false);
+                      focusMenuTrigger(dataSelectRef.current);
+                    }}
+                  >
+                    <span>{marketDataModeLabel(t, option.value)}</span>
+                    <small>{marketDataModeDetail(t, option.value)}</small>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </label>
       </div>
       <div className="control-actions">
@@ -3601,8 +4569,8 @@ function SimulationControls({
           <RotateCcw size={14} />
           {t("panels.restart", "RESTART")}
         </button>
-        <button className={classNames(isStopped && "blocked-action")} type="button" onClick={onSimStep} disabled={isSimulating} title={isStopped ? t("toast.resumeBeforeAiStep", "Resume the run before starting an AI step") : ""}>
-          <Plus size={14} />
+        <button className={classNames(isStopped && "blocked-action", isSimulating && "is-running")} type="button" onClick={onSimStep} disabled={isSimulating} title={isStopped ? t("toast.resumeBeforeAiStep", "Resume the run before starting an AI step") : ""}>
+          {isSimulating ? <LoaderCircle size={14} /> : <Plus size={14} />}
           {isSimulating ? t("panels.running", "RUNNING") : t("panels.aiStep", "AI STEP")}
         </button>
       </div>
@@ -3611,7 +4579,7 @@ function SimulationControls({
           <Brain size={14} />
           <strong>{t("panels.aiAutopilot", "AI Autopilot")}</strong>
           <span className={classNames("autopilot-status", autoTone)}>
-            {autopilot?.running ? "running" : autopilot?.lastStatus || "idle"}
+            {autopilot?.running ? statusText(t, "Running") : statusText(t, autopilot?.lastStatus || "Idle")}
           </span>
         </div>
         <div className="autopilot-grid">
@@ -3620,7 +4588,7 @@ function SimulationControls({
           <span>{t("panels.steps", "Steps")}</span>
           <strong>{autopilot?.completedSteps ?? 0}</strong>
           <span>{t("common.mode", "Mode")}</span>
-          <strong>{autoMode}</strong>
+          <strong>{choiceLabel(t, autoMode)}</strong>
           <span>{t("panels.next", "Next")}</span>
           <code>{autopilot?.nextRunAt ? formatClock(autopilot.nextRunAt) : latestAutoRun?.status || "-"}</code>
         </div>
@@ -3667,16 +4635,64 @@ function SimulationControls({
               <span>8x</span>
             </div>
           </label>
-          <label className="jump-control">
+          <div className="jump-control">
             <span>{t("panels.jumpTo", "Jump To")}</span>
-            <button
-              className="select-button compact"
-              type="button"
-              onClick={() => onActionNotice(t("panels.jumpTo", "Jump To"), t("toast.jumpHint", "Jump-to-time uses replay history; choose a backtest or run AI step first"))}
+            <div
+              className="jump-select"
+              ref={jumpSelectRef}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setIsJumpOpen(false);
+                }
+              }}
+              onKeyDown={(event) => {
+                handleMenuListKeyDown(event, { container: jumpSelectRef.current, closeMenu: () => setIsJumpOpen(false) });
+              }}
             >
-              2026-05-24 14:32:18
-            </button>
-          </label>
+              <button
+                className={classNames("select-button compact", jumpDisabledReason && "blocked-action")}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={isJumpOpen}
+                aria-disabled={Boolean(jumpDisabledReason)}
+                title={jumpDisabledReason || jumpLabel}
+                onClick={() => {
+                  if (jumpDisabledReason) {
+                    onActionNotice(t("panels.jumpTo", "Jump To"), jumpDisabledReason);
+                    return;
+                  }
+                  setIsJumpOpen((value) => !value);
+                }}
+                onKeyDown={(event) => handleMenuTriggerKeyDown(event, openJumpMenu)}
+              >
+                <Clock3 size={13} />
+                <strong>{jumpLabel}</strong>
+                <ChevronDown size={13} />
+              </button>
+              <small>{replayPoint ? `${t("panels.replayCursor", "Replay cursor")} · ${replayPoint.tag}` : t("panels.replayPaused", "Replay waits for market data")}</small>
+              {isJumpOpen ? (
+                <div className="jump-menu" role="menu">
+                  {replayOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      className={option.value === replayPoint?.value ? "active" : ""}
+                      type="button"
+                      role="menuitem"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                      onReplayJump(option);
+                      setIsJumpOpen(false);
+                      focusMenuTrigger(jumpSelectRef.current);
+                    }}
+                    >
+                      <span>{option.label}</span>
+                      <small>{option.tag}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
         </>
       )}
     </section>
@@ -3685,12 +4701,23 @@ function SimulationControls({
 
 function WorkspaceTabs({ t, active, onChange }) {
   return (
-    <nav className="workspace-tabs">
-      {["Real-time Sim", "Backtest", "Shadow Trade"].map((tab) => (
-        <button key={tab} type="button" className={active === tab ? "active" : ""} onClick={() => onChange(tab)}>
-          {choiceLabel(t, tab)}
-        </button>
-      ))}
+    <nav className="workspace-tabs" aria-label={t("panels.workspaceTabs", "Workspace tabs")}>
+      {["Real-time Sim", "Backtest", "Shadow Trade"].map((tab) => {
+        const label = choiceLabel(t, tab);
+        return (
+          <button
+            key={tab}
+            type="button"
+            className={active === tab ? "active" : ""}
+            aria-pressed={active === tab}
+            aria-label={label}
+            title={label}
+            onClick={() => onChange(tab)}
+          >
+            {label}
+          </button>
+        );
+      })}
     </nav>
   );
 }
@@ -3710,12 +4737,16 @@ function ChartWorkspace({
   isRunningBacktest,
   onRunBacktest,
   timeframe,
+  marketDataMode,
   theme,
   onTimeframeChange,
   onOpenStrategy,
   onActionNotice,
 }) {
   const lastCandle = candles[candles.length - 1];
+  const candleChange = (lastCandle?.close ?? 0) - (lastCandle?.open ?? 0);
+  const candleChangePct = lastCandle?.open ? (candleChange / lastCandle.open) * 100 : 0;
+  const candleChangeTone = candleChange >= 0 ? "positive-text" : "negative-text";
   const [showIndicators, setShowIndicators] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   return (
@@ -3727,7 +4758,15 @@ function ChartWorkspace({
         </div>
         <div className="chart-tools">
           {chartTimeframes.map((item) => (
-            <button key={item} type="button" className={item === timeframe ? "active" : ""} onClick={() => onTimeframeChange(item)}>
+            <button
+              key={item}
+              type="button"
+              className={item === timeframe ? "active" : ""}
+              aria-pressed={item === timeframe}
+              aria-label={t("panels.timeframeOption", "Timeframe {value}", { value: item })}
+              title={t("panels.timeframeOption", "Timeframe {value}", { value: item })}
+              onClick={() => onTimeframeChange(item)}
+            >
               {item}
             </button>
           ))}
@@ -3738,16 +4777,24 @@ function ChartWorkspace({
               setShowIndicators((value) => !value);
               onActionNotice(t("panels.indicators", "Indicators"), showIndicators ? t("toast.indicatorsHidden", "Indicators hidden") : t("toast.indicatorsShown", "Indicators shown"));
             }}
+            aria-pressed={showIndicators}
+            aria-label={t("panels.indicators", "Indicators")}
           >
             <BarChart3 size={14} /> {t("panels.indicators", "Indicators")}
           </button>
           {tab === "Backtest" && (
-            <button className="active" type="button" onClick={onRunBacktest} disabled={isRunningBacktest}>
-              <Play size={13} />
+            <button
+              className={classNames("run-action", isRunningBacktest && "is-running")}
+              type="button"
+              onClick={onRunBacktest}
+              disabled={isRunningBacktest}
+              aria-busy={isRunningBacktest}
+            >
+              {isRunningBacktest ? <LoaderCircle size={13} /> : <Play size={13} />}
               {isRunningBacktest ? t("panels.runningBacktest", "Running") : t("panels.runBacktest", "Run")}
             </button>
           )}
-          <button type="button" onClick={onOpenStrategy} title={t("panels.configureStrategy", "Configure strategy")}>
+          <button className="strategy-config-trigger" type="button" onClick={onOpenStrategy} title={t("panels.configureStrategy", "Configure strategy")} aria-label={t("panels.configureStrategy", "Configure strategy")}>
             <Settings size={14} />
           </button>
           <button
@@ -3757,18 +4804,20 @@ function ChartWorkspace({
               setIsExpanded((value) => !value);
               onActionNotice(t("panels.expandChart", "Chart size"), isExpanded ? t("toast.chartCollapsed", "Chart returned to normal size") : t("toast.chartExpanded", "Chart expanded"));
             }}
-            title={t("panels.expandChart", "Chart size")}
+            aria-pressed={isExpanded}
+            aria-label={isExpanded ? t("panels.collapseChart", "Collapse chart") : t("panels.expandChart", "Chart size")}
+            title={isExpanded ? t("panels.collapseChart", "Collapse chart") : t("panels.expandChart", "Chart size")}
           >
-            <Maximize2 size={14} />
+            {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
         </div>
       </div>
       {showIndicators ? (
         <div className="indicator-strip">
           <span>EMA 6/18</span>
-          <strong className="positive-text">Momentum +0.48</strong>
-          <span>Spread 0.03%</span>
-          <strong className="warn-text">Funding -0.23</strong>
+          <strong className="positive-text">{choiceLabel(t, "Momentum")} +0.48</strong>
+          <span>{t("guard.spread", "Spread %").replace(" %", "")} 0.03%</span>
+          <strong className="warn-text">{t("panels.funding", "Funding")} -0.23</strong>
         </div>
       ) : null}
       {tab === "Backtest" ? (
@@ -3781,16 +4830,17 @@ function ChartWorkspace({
         <span>{t("panels.lastUpdate", "Last Update")}: {meta.lastUpdated}</span>
       </div>
       <div className="chart-stack">
-        <EquityChart equity={equity} benchmark={benchmark} theme={theme} />
-        <MarketChart candles={candles} theme={theme} />
+        <EquityChart equity={equity} benchmark={benchmark} theme={theme} height={isExpanded ? 190 : 120} />
+        <MarketChart candles={candles} theme={theme} height={isExpanded ? 480 : 248} />
       </div>
       <div className="market-footer">
-        <span>{meta.selectedMarket} - {timeframe} - {meta.dataSource}</span>
+        <span>{meta.selectedMarket} - {timeframe} - {marketDataModeShortLabel(t, marketDataMode)}</span>
         <span>O {numberFormat.format(lastCandle.open)} H {numberFormat.format(lastCandle.high)} L {numberFormat.format(lastCandle.low)} C {numberFormat.format(lastCandle.close)}</span>
-        <strong>+{(lastCandle.close - lastCandle.open).toFixed(1)} (+0.35%)</strong>
-        <a className="chart-attribution" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">
-          {t("panels.chartAttribution", "Charts by TradingView")}
-        </a>
+        <strong className={candleChangeTone}>{formatSignedNumber(candleChange)} ({formatSignedPct(candleChangePct)})</strong>
+        <span className="chart-source-badge" title={marketDataModeDetail(t, marketDataMode)}>
+          <Database size={11} />
+          {marketDataModeLabel(t, marketDataMode)}
+        </span>
       </div>
         </>
       )}
@@ -3803,6 +4853,14 @@ function BacktestWorkspace({ t, result, runs = [], status, isRunning, onRun }) {
   const points = result?.equity || [];
   const trades = result?.trades || [];
   const latestPoints = points.slice(-22);
+  const sourceText = summary?.marketDataSource ? marketDataSourceLabel(t, summary.marketDataSource) : "";
+  const statusDisplay = compactStatusText(t, status?.message || "Ready", 44);
+  const statusTitle = compactStatusTitle(t, status?.message || "Ready");
+  const statusLine = sourceText ? `${statusDisplay} / ${sourceText}` : statusDisplay;
+  const fullStatusLine = sourceText ? `${statusText(t, status?.message || "Ready")} / ${sourceText}` : statusText(t, status?.message || "Ready");
+  const tradeMeta = summary?.warning || (summary ? t("panels.maCandles", "{fast}/{slow} MA - {count} candles", { fast: summary.fastWindow, slow: summary.slowWindow, count: summary.candleCount }) : t("panels.publicCandles", "15m public candles"));
+  const tradeMetaDisplay = compactStatusText(t, tradeMeta, 46);
+  const tradeMetaTitle = compactStatusTitle(t, tradeMeta);
   return (
     <div className="backtest-workspace">
       <div className="backtest-summary">
@@ -3819,15 +4877,15 @@ function BacktestWorkspace({ t, result, runs = [], status, isRunning, onRun }) {
         <section className="backtest-curve">
           <div className="backtest-section-head">
             <strong>{t("panels.equityCurve", "Equity Curve")}</strong>
-            <span className={status?.tone ? `${status.tone}-text` : ""}>
-              {statusText(t, status?.message || "Ready")}{summary?.marketDataSource ? ` / ${summary.marketDataSource}` : ""}
+            <span className={status?.tone ? `${status.tone}-text` : ""} title={statusTitle || (fullStatusLine !== statusLine ? fullStatusLine : undefined)}>
+              {statusLine}
             </span>
           </div>
           {latestPoints.length === 0 ? (
             <div className="backtest-empty">
               <span>{isRunning ? t("panels.runningBacktestState", "Running backtest") : t("panels.noBacktestResult", "No backtest result")}</span>
               <button type="button" onClick={onRun} disabled={isRunning}>
-                <Play size={13} />
+                {isRunning ? <LoaderCircle size={13} /> : <Play size={13} />}
                 {isRunning ? t("panels.running", "RUNNING") : t("panels.runBacktestUpper", "RUN BACKTEST")}
               </button>
             </div>
@@ -3851,7 +4909,7 @@ function BacktestWorkspace({ t, result, runs = [], status, isRunning, onRun }) {
         <section className="backtest-trades">
           <div className="backtest-section-head">
             <strong>{t("panels.trades", "Trades")}</strong>
-            <span>{summary?.warning || (summary ? `${summary.fastWindow}/${summary.slowWindow} MA - ${summary.candleCount} candles` : "15m public candles")}</span>
+            <span title={tradeMetaTitle || (tradeMetaDisplay !== tradeMeta ? tradeMeta : undefined)}>{tradeMetaDisplay}</span>
           </div>
           <div className="backtest-table-wrap">
             <table className="data-table backtest-table">
@@ -3874,13 +4932,13 @@ function BacktestWorkspace({ t, result, runs = [], status, isRunning, onRun }) {
                     </td>
                   </tr>
                 ) : (
-                  trades.slice(-8).map((trade) => (
+                  trades.map((trade) => (
                     <tr key={trade.id}>
                       <th>
                         <strong>{trade.id}</strong>
                         <small>{formatDateTime(trade.openedAt)}</small>
                       </th>
-                      <td className={trade.side === "sell" ? "negative-text" : "positive-text"}>{trade.side.toUpperCase()}</td>
+                      <td className={trade.side === "sell" ? "negative-text" : "positive-text"}>{choiceLabel(t, String(trade.side || "").toUpperCase())}</td>
                       <td>{formatMoney(trade.entryPrice)}</td>
                       <td>{formatMoney(trade.exitPrice)}</td>
                       <td className={trade.pnlUsdt >= 0 ? "positive-text" : "negative-text"}>{formatSignedMoney(trade.pnlUsdt)}</td>
@@ -3934,7 +4992,7 @@ function BacktestHistory({ t, runs }) {
                   <td>{run.symbol}</td>
                   <td className={run.returnPct >= 0 ? "positive-text" : "negative-text"}>{formatSignedPct(run.returnPct)}</td>
                   <td>{run.tradeCount}</td>
-                  <td>{formatMarketDataSource(run.marketDataSource)}</td>
+                  <td>{marketDataSourceLabel(t, run.marketDataSource)}</td>
                 </tr>
               ))
             )}
@@ -3961,12 +5019,12 @@ function formatBacktestTime(value) {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function EquityChart({ equity, benchmark, theme }) {
+function EquityChart({ equity, benchmark, theme, height = 158 }) {
   const ref = useRef(null);
 
   useEffect(() => {
     if (!ref.current) return undefined;
-    const chart = createChart(ref.current, chartOptions({ height: 158, theme }));
+    const chart = createChart(ref.current, chartOptions({ height, theme }));
     const palette = chartPalette(theme);
     const equitySeries = chart.addSeries(AreaSeries, {
       topColor: palette.equityTop,
@@ -3991,17 +5049,17 @@ function EquityChart({ equity, benchmark, theme }) {
       window.removeEventListener("resize", resize);
       chart.remove();
     };
-  }, [benchmark, equity, theme]);
+  }, [benchmark, equity, height, theme]);
 
-  return <div className="equity-chart" ref={ref} />;
+  return <div className="equity-chart" ref={ref} style={{ height }} />;
 }
 
-function MarketChart({ candles, theme }) {
+function MarketChart({ candles, theme, height = 355 }) {
   const ref = useRef(null);
 
   useEffect(() => {
     if (!ref.current) return undefined;
-    const chart = createChart(ref.current, chartOptions({ height: 355, theme }));
+    const chart = createChart(ref.current, chartOptions({ height, theme }));
     const palette = chartPalette(theme);
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: palette.green,
@@ -4040,9 +5098,9 @@ function MarketChart({ candles, theme }) {
       window.removeEventListener("resize", resize);
       chart.remove();
     };
-  }, [candles, theme]);
+  }, [candles, height, theme]);
 
-  return <div className="market-chart" ref={ref} />;
+  return <div className="market-chart" ref={ref} style={{ height }} />;
 }
 
 function chartPalette(theme) {
@@ -4098,6 +5156,7 @@ function chartOptions({ height, theme }) {
     },
     timeScale: {
       borderColor: palette.border,
+      rightOffset: 2,
       timeVisible: true,
       secondsVisible: false,
     },
@@ -4119,7 +5178,7 @@ function VerdictPanel({ t, verdict, features, mode, onOpenAIConfig }) {
       </div>
       <div className="signal-block">
         <span>{t("panels.currentSignal", "Current Signal")}</span>
-        <strong>{verdict.signal}</strong>
+        <strong>{choiceLabel(t, verdict.signal)}</strong>
         <Zap size={28} />
       </div>
       <div className="confidence">
@@ -4134,7 +5193,7 @@ function VerdictPanel({ t, verdict, features, mode, onOpenAIConfig }) {
         <h3>{t("panels.keyFeatures", "Key Features (Impact)")}</h3>
         {features.map((feature) => (
           <div className="feature-row" key={feature.name}>
-            <span>{feature.name}</span>
+            <span>{choiceLabel(t, feature.name)}</span>
             <div className="feature-track"><i style={{ width: `${Math.abs(feature.value) * 82}%` }} /></div>
             <strong className={feature.impact === "negative" ? "negative-text" : "positive-text"}>
               {feature.value > 0 ? "+" : ""}{feature.value.toFixed(2)}
@@ -4143,14 +5202,14 @@ function VerdictPanel({ t, verdict, features, mode, onOpenAIConfig }) {
         ))}
       </section>
       <div className="verdict-facts">
-        <Fact label={t("panels.uncertainty", "Uncertainty")} value={`${verdict.uncertainty} (${verdict.uncertaintyScore.toFixed(2)})`} tone="warn" />
-        <Fact label={t("panels.regime", "Regime")} value={verdict.regime} />
-        <Fact label={t("panels.riskOverride", "Risk Override")} value={verdict.riskOverride} tone="success" />
+        <Fact label={t("panels.uncertainty", "Uncertainty")} value={`${choiceLabel(t, verdict.uncertainty)} (${verdict.uncertaintyScore.toFixed(2)})`} tone="warn" />
+        <Fact label={t("panels.regime", "Regime")} value={choiceLabel(t, verdict.regime)} />
+        <Fact label={t("panels.riskOverride", "Risk Override")} value={choiceLabel(t, verdict.riskOverride)} tone="success" />
         <Fact label={t("common.mode", "Mode")} value={choiceLabel(t, mode)} />
       </div>
       <div className="reasoning">
         <h3>{t("panels.modelReasoning", "Model Reasoning (Summary)")}</h3>
-        <p>{verdict.reasoning}</p>
+        <p>{reasoningText(t, verdict.reasoning)}</p>
       </div>
       <div className="ttl-row">
         <Clock3 size={15} />
@@ -4200,7 +5259,52 @@ function BottomPanel({
   setEventFilter,
   onNotify,
   meta,
+  features = [],
+  verdict,
+  riskProfile,
+  strategyProfile,
+  allEvents = [],
+  mode,
 }) {
+  const [isLogSettingsOpen, setIsLogSettingsOpen] = useState(false);
+  const [logAutoScroll, setLogAutoScroll] = useState(true);
+  const [compactLog, setCompactLog] = useState(true);
+  const logToolsRef = useRef(null);
+
+  useDismissOnOutside(isLogSettingsOpen, logToolsRef, () => setIsLogSettingsOpen(false));
+
+  useEffect(() => {
+    if (!isLogSettingsOpen) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsLogSettingsOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isLogSettingsOpen]);
+
+  function handleToggleLogAutoScroll() {
+    setLogAutoScroll((value) => {
+      const next = !value;
+      onNotify(next ? t("toast.logAutoScrollEnabled", "Log auto-scroll enabled") : t("toast.logAutoScrollPaused", "Log auto-scroll paused"), next ? "success" : "warn");
+      return next;
+    });
+  }
+
+  function handleToggleCompactLog() {
+    setCompactLog((value) => {
+      const next = !value;
+      onNotify(next ? t("toast.compactLogEnabled", "Compact event rows enabled") : t("toast.compactLogDisabled", "Expanded event rows enabled"), "info");
+      return next;
+    });
+  }
+
+  function openLogSettingsMenu() {
+    setIsLogSettingsOpen(true);
+    focusFirstMenuItem(logToolsRef.current);
+  }
+
   function exportVisibleEvents() {
     const payload = {
       product: "CCVar Quant Lab",
@@ -4222,21 +5326,33 @@ function BottomPanel({
 
   return (
     <section className="bottom-panel panel">
-      <nav className="bottom-tabs">
-        {["Performance", "AI Steps", "Trades", "Positions", "Orders", "Metrics", "Risk"].map((tab) => (
-          <button key={tab} type="button" className={active === tab ? "active" : ""} onClick={() => setActive(tab)}>
-            {choiceLabel(t, tab)}
-            {tab === "AI Steps"
-              ? ` (${autopilotSteps.length})`
-              : tab === "Trades"
-                ? ` (${paperExecutions.length})`
-                : tab === "Positions"
-                  ? ` (${positions.length})`
-                  : tab === "Orders"
-                    ? ` (${orders.length})`
-                    : ""}
-          </button>
-        ))}
+      <nav className="bottom-tabs" aria-label={t("panels.analysisTabs", "Analysis tabs")}>
+        {["Performance", "AI Steps", "Trades", "Positions", "Orders", "Metrics", "Risk"].map((tab) => {
+          const label = choiceLabel(t, tab);
+          const countText = tab === "AI Steps"
+            ? ` (${autopilotSteps.length})`
+            : tab === "Trades"
+              ? ` (${paperExecutions.length})`
+              : tab === "Positions"
+                ? ` (${positions.length})`
+                : tab === "Orders"
+                  ? ` (${orders.length})`
+                  : "";
+          return (
+            <button
+              key={tab}
+              type="button"
+              className={active === tab ? "active" : ""}
+              aria-pressed={active === tab}
+              aria-label={`${label}${countText}`}
+              title={`${label}${countText}`}
+              onClick={() => setActive(tab)}
+            >
+              {label}
+              {countText}
+            </button>
+          );
+        })}
       </nav>
       <div className="bottom-grid">
         <div className="bottom-main">
@@ -4244,6 +5360,8 @@ function BottomPanel({
           {active === "Positions" && <PositionsTable t={t} rows={positions} />}
           {active === "Orders" && <OrdersTable t={t} rows={orders} />}
           {active === "AI Steps" && <AutopilotStepsView t={t} rows={autopilotSteps} />}
+          {active === "Metrics" && <MetricsView t={t} features={features} verdict={verdict} performance={performance} />}
+          {active === "Risk" && <RiskView t={t} profile={riskProfile} strategyProfile={strategyProfile} verdict={verdict} events={allEvents} mode={mode} meta={meta} />}
           {active === "Trades" && (
             <PaperLedgerView
               t={t}
@@ -4255,143 +5373,487 @@ function BottomPanel({
               onReset={onPaperReset}
             />
           )}
-          {active !== "Performance" && active !== "Positions" && active !== "Orders" && active !== "AI Steps" && active !== "Trades" && (
+          {active !== "Performance" && active !== "Positions" && active !== "Orders" && active !== "AI Steps" && active !== "Trades" && active !== "Metrics" && active !== "Risk" && (
             <EventLog t={t} events={events} />
           )}
         </div>
         <div className="bottom-side">
           <div className="log-header">
             <h2>{t("panels.eventLog", "Event Log")}</h2>
-            <div className="icon-row">
-              <button
-                type="button"
-                onClick={() => {
-                  setActive("Risk");
-                  onNotify(t("toast.riskTabOpened", "Risk tab opened"), "info");
-                }}
-                title={t("panels.riskSettings", "Risk settings")}
-              >
-                <Settings size={14} />
-              </button>
-              <button type="button" onClick={exportVisibleEvents} title={t("panels.exportEvents", "Export events")}>
-                <Download size={14} />
-              </button>
+            <div
+              className="log-tools"
+              ref={logToolsRef}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setIsLogSettingsOpen(false);
+                }
+              }}
+              onKeyDown={(event) => {
+                handleMenuListKeyDown(event, { container: logToolsRef.current, closeMenu: () => setIsLogSettingsOpen(false) });
+              }}
+            >
+              <div className="icon-row">
+                <button
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={isLogSettingsOpen}
+                  onClick={() => setIsLogSettingsOpen((value) => !value)}
+                  onKeyDown={(event) => handleMenuTriggerKeyDown(event, openLogSettingsMenu)}
+                  title={t("panels.eventLogSettings", "Event log settings")}
+                  aria-label={t("panels.eventLogSettings", "Event log settings")}
+                >
+                  <Settings size={14} />
+                </button>
+                <button type="button" onClick={exportVisibleEvents} title={t("panels.exportEvents", "Export events")} aria-label={t("panels.exportEvents", "Export events")}>
+                  <Download size={14} />
+                </button>
+              </div>
+              {isLogSettingsOpen ? (
+                <div className="log-settings-menu" role="menu">
+                  <button className={logAutoScroll ? "active" : ""} type="button" role="menuitemcheckbox" aria-checked={logAutoScroll} onMouseDown={(event) => event.preventDefault()} onClick={handleToggleLogAutoScroll}>
+                    <span>
+                      {logAutoScroll ? <Check size={13} /> : <Square size={12} />}
+                      {t("panels.logAutoScroll", "Log Auto-Scroll")}
+                    </span>
+                    <small>{t("panels.logAutoScrollDetail", "Keep newest events in view")}</small>
+                  </button>
+                  <button className={compactLog ? "active" : ""} type="button" role="menuitemcheckbox" aria-checked={compactLog} onMouseDown={(event) => event.preventDefault()} onClick={handleToggleCompactLog}>
+                    <span>
+                      {compactLog ? <Check size={13} /> : <Square size={12} />}
+                      {t("panels.compactLog", "Compact rows")}
+                    </span>
+                    <small>{t("panels.compactLogDetail", "Use narrow event columns")}</small>
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
-          <div className="filter-row">
-            {["All", "AI Decision", "Sim Fill", "Shadow", "Risk"].map((filter) => (
-              <button key={filter} type="button" className={eventFilter === filter ? "active" : ""} onClick={() => setEventFilter(filter)}>
-                {choiceLabel(t, filter)}
-              </button>
-            ))}
+          <div className="filter-row" role="group" aria-label={t("panels.eventFilters", "Event filters")}>
+            {["All", "AI Decision", "Sim Fill", "Shadow", "Risk"].map((filter) => {
+              const label = choiceLabel(t, filter);
+              return (
+                <button
+                  key={filter}
+                  type="button"
+                  className={eventFilter === filter ? "active" : ""}
+                  aria-pressed={eventFilter === filter}
+                  aria-label={label}
+                  title={label}
+                  onClick={() => setEventFilter(filter)}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
-          <EventLog t={t} events={events} compact />
+          <EventLog t={t} events={events} compact={compactLog} autoScroll={logAutoScroll} />
         </div>
       </div>
       <footer className="model-footer">
-        <span>{t("panels.slippageModel", "Slippage Model")}: {meta.slippageModel}</span>
+        <span>{t("panels.slippageModel", "Slippage Model")}: {modelMetaText(t, meta.slippageModel)}</span>
         <span>{t("panels.fees", "Fees")}: {meta.feeModel}</span>
-        <span>{t("panels.funding", "Funding")}: {meta.fundingModel}</span>
-        <span>{t("panels.logAutoScroll", "Log Auto-Scroll")} <i className="toggle-on" /></span>
+        <span>{t("panels.funding", "Funding")}: {choiceLabel(t, meta.fundingModel)}</span>
+        <button className="footer-toggle" type="button" onClick={handleToggleLogAutoScroll} aria-label={t("panels.logAutoScroll", "Log Auto-Scroll")}>
+          <span>{t("panels.logAutoScroll", "Log Auto-Scroll")}</span>
+          <strong>{logAutoScroll ? t("panels.enabled", "Enabled") : t("panels.paused", "Paused")}</strong>
+          <i className={logAutoScroll ? "toggle-on" : "toggle-off"} />
+        </button>
       </footer>
     </section>
   );
 }
 
+function AnalyticsStat({ label, value, sub, tone }) {
+  return (
+    <div className={classNames("analytics-stat", tone)}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {sub ? <small>{sub}</small> : null}
+    </div>
+  );
+}
+
+function MetricsView({ t, features = [], verdict = {}, performance = [] }) {
+  const returnRow = performance.find((row) => row.metric === "Return");
+  const confidence = Number(verdict?.confidence || 0);
+  return (
+    <div className="analytics-view">
+      <div className="analytics-strip">
+        <AnalyticsStat label={t("panels.currentSignal", "Current Signal")} value={choiceLabel(t, verdict?.signal || "-")} sub={choiceLabel(t, verdict?.regime || "-")} tone={String(verdict?.signal || "").toLowerCase() === "sell" ? "danger" : "success"} />
+        <AnalyticsStat label={t("common.confidence", "Confidence")} value={`${Number.isFinite(confidence) ? Math.round(confidence) : 0}%`} sub={`${t("panels.uncertainty", "Uncertainty")} ${verdict?.uncertaintyScore ?? "-"}`} tone={confidence >= 70 ? "success" : "warn"} />
+        <AnalyticsStat label={t("panels.return7d", "Ret. 7D")} value={returnRow?.sevenDay || "-"} sub={t("panels.equityCurveSim", "Equity Curve (Sim)")} tone={String(returnRow?.sevenDay || "").startsWith("-") ? "danger" : "success"} />
+        <AnalyticsStat label={t("panels.regime", "Regime")} value={choiceLabel(t, verdict?.regime || "-")} sub={verdict?.riskOverride ? `${t("panels.riskOverride", "Risk Override")}: ${choiceLabel(t, verdict.riskOverride)}` : ""} />
+      </div>
+      <div className="analytics-table-wrap">
+        <table className="data-table analytics-table">
+          <thead>
+            <tr>
+              <th>{t("panels.feature", "Feature")}</th>
+              <th>{t("panels.score", "Score")}</th>
+              <th>{t("panels.impact", "Impact")}</th>
+              <th>{t("panels.contribution", "Contribution")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {features.map((feature) => {
+              const isNegative = feature.impact === "negative" || Number(feature.value) < 0;
+              return (
+                <tr key={feature.name}>
+                  <th>{choiceLabel(t, feature.name)}</th>
+                  <td className={isNegative ? "negative-text" : "positive-text"}>{feature.value > 0 ? "+" : ""}{Number(feature.value || 0).toFixed(2)}</td>
+                  <td>{choiceLabel(t, feature.impact || "-")}</td>
+                  <td>
+                    <div className="inline-track">
+                      <i className={isNegative ? "negative" : ""} style={{ width: `${Math.min(100, Math.abs(Number(feature.value || 0)) * 82)}%` }} />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RiskView({ t, profile = defaultRiskProfile, strategyProfile = defaultStrategyProfile, verdict = {}, events = [], mode, meta }) {
+  const confidence = Number(verdict?.confidence || 0) / 100;
+  const dailyDrawdown = Math.abs(Number(meta?.dailyDrawdown || 0));
+  const orderSizeUsdt = Number(strategyProfile?.orderSizeUsdt || defaultStrategyProfile.orderSizeUsdt || 0);
+  const riskEvents = events.filter((event) => String(event.type || "").includes("Risk") || event.level === "danger");
+  const checks = [
+    {
+      label: t("guard.maxOrder", "Max Order"),
+      limit: `${formatMoney(Number(profile.maxOrderUsdt || 0))} USDT`,
+      current: `${formatMoney(orderSizeUsdt)} USDT`,
+      ok: orderSizeUsdt <= Number(profile.maxOrderUsdt || 0),
+    },
+    {
+      label: t("guard.totalExposure", "Total Exp."),
+      limit: `${formatMoney(Number(profile.maxTotalExposureUsdt || 0))} USDT`,
+      current: `${formatMoney(Number(profile.maxSymbolExposureUsdt || 0))} USDT / ${t("common.symbol", "Symbol")}`,
+      ok: Number(profile.maxSymbolExposureUsdt || 0) <= Number(profile.maxTotalExposureUsdt || 0),
+    },
+    {
+      label: t("panels.dailyDrawdown", "Daily Drawdown"),
+      limit: `${Number(profile.maxDailyDrawdownPct || 0).toFixed(2)}%`,
+      current: `${dailyDrawdown.toFixed(2)}%`,
+      ok: dailyDrawdown <= Number(profile.maxDailyDrawdownPct || 0),
+    },
+    {
+      label: t("panels.confidenceGate", "Confidence Gate"),
+      limit: `${Math.round(Number(profile.minConfidence || 0) * 100)}%`,
+      current: `${Math.round(confidence * 100)}%`,
+      ok: confidence >= Number(profile.minConfidence || 0),
+    },
+    {
+      label: t("guard.spread", "Spread %"),
+      limit: `${Number(profile.maxSpreadPct || 0).toFixed(3)}%`,
+      current: t("panels.marketReady", "Market ready"),
+      ok: true,
+    },
+  ];
+  const allClear = checks.every((check) => check.ok) && String(verdict?.riskOverride || "").toLowerCase() !== "block";
+  return (
+    <div className="analytics-view">
+      <div className="analytics-strip">
+        <AnalyticsStat label={t("panels.guardStatus", "Guard Status")} value={allClear ? t("common.readyUpper", "READY") : t("common.blockedUpper", "Blocked")} sub={mode ? choiceLabel(t, mode) : "-"} tone={allClear ? "success" : "danger"} />
+        <AnalyticsStat label={t("panels.riskOverride", "Risk Override")} value={choiceLabel(t, verdict?.riskOverride || "-")} sub={choiceLabel(t, verdict?.regime || "-")} tone={String(verdict?.riskOverride || "").toLowerCase() === "none" ? "success" : "warn"} />
+        <AnalyticsStat label={t("panels.riskEvents", "Risk Events")} value={String(riskEvents.length)} sub={riskEvents[0]?.note ? choiceLabel(t, riskEvents[0].note) : t("panels.noRiskEvents", "No blocking event")} tone={riskEvents.length ? "warn" : "success"} />
+        <AnalyticsStat label={t("panels.liveUnlock", "Live Unlock")} value={profile.requireLiveUnlock ? t("panels.required", "Required") : t("panels.optional", "Optional")} sub={t("top.guard", "Guard")} />
+      </div>
+      <div className="analytics-table-wrap">
+        <table className="data-table analytics-table risk-check-table">
+          <thead>
+            <tr>
+              <th>{t("panels.guardrail", "Guardrail")}</th>
+              <th>{t("panels.limit", "Limit")}</th>
+              <th>{t("panels.current", "Current")}</th>
+              <th>{t("common.status", "Status")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {checks.map((check) => (
+              <tr key={check.label}>
+                <th>{check.label}</th>
+                <td>{check.limit}</td>
+                <td>{check.current}</td>
+                <td>
+                  <span className={check.ok ? "risk-low" : "order-status danger"}>{check.ok ? t("common.readyUpper", "READY") : t("common.blockedUpper", "Blocked")}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function PerformanceTable({ t, rows }) {
   return (
-    <table className="data-table performance-table">
-      <thead>
-        <tr>
-          <th>{t("table.metric", "Metric")}</th>
-          <th>{t("table.sevenDay", "7D (Sim)")}</th>
-          <th>{t("table.thirtyDay", "30D (Sim)")}</th>
-          <th>{t("table.allTime", "All Time (Sim)")}</th>
-          <th>{t("table.benchmark7d", "Benchmark 7D")}</th>
-          <th>{t("table.benchmark30d", "Benchmark 30D")}</th>
-          <th>{t("table.benchmarkAll", "Benchmark All")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.metric}>
-            <th>{row.metric}</th>
-            <td className={row.trend === "negative" ? "negative-text" : row.trend === "positive" ? "positive-text" : ""}>{row.sevenDay}</td>
-            <td>{row.thirtyDay}</td>
-            <td>{row.allTime}</td>
-            <td>{row.benchmark7d}</td>
-            <td>{row.benchmark30d}</td>
-            <td>{row.benchmarkAll}</td>
+    <WideTableFrame
+      t={t}
+      className="performance-table-frame"
+      controlsId="performance-horizontal-table"
+      label={t("table.performanceHorizontalScroll", "Performance table horizontal scroll")}
+    >
+      <table className="data-table performance-table" id="performance-horizontal-table">
+        <thead>
+          <tr>
+            <th>{t("table.metric", "Metric")}</th>
+            <th>{t("table.sevenDay", "7D (Sim)")}</th>
+            <th>{t("table.thirtyDay", "30D (Sim)")}</th>
+            <th>{t("table.allTime", "All Time (Sim)")}</th>
+            <th>{t("table.benchmark7d", "Benchmark 7D")}</th>
+            <th>{t("table.benchmark30d", "Benchmark 30D")}</th>
+            <th>{t("table.benchmarkAll", "Benchmark All")}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.metric}>
+              <th>{choiceLabel(t, row.metric)}</th>
+              <td className={row.trend === "negative" ? "negative-text" : row.trend === "positive" ? "positive-text" : ""}>{row.sevenDay}</td>
+              <td>{row.thirtyDay}</td>
+              <td>{row.allTime}</td>
+              <td>{row.benchmark7d}</td>
+              <td>{row.benchmark30d}</td>
+              <td>{row.benchmarkAll}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </WideTableFrame>
   );
 }
 
 function PositionsTable({ t, rows }) {
   return (
-    <table className="data-table">
-      <thead>
-        <tr>
-          <th>{t("common.symbol", "Symbol")}</th>
-          <th>{t("common.side", "Side")}</th>
-          <th>{t("common.size", "Size")}</th>
-          <th>{t("table.entry", "Entry")}</th>
-          <th>{t("table.mark", "Mark")}</th>
-          <th>{t("table.pnlUsdt", "PnL (USDT)")}</th>
-          <th>{t("table.pnlPct", "PnL (%)")}</th>
-          <th>{t("common.risk", "Risk")}</th>
-          <th>{t("table.age", "Age")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.symbol}>
-            <th>{row.symbol}</th>
-            <td className="positive-text">{row.side}</td>
-            <td>{row.size}</td>
-            <td>{numberFormat.format(row.entry)}</td>
-            <td>{numberFormat.format(row.mark)}</td>
-            <td className="positive-text">+{formatMoney(row.pnl)}</td>
-            <td className="positive-text">+{row.pnlPct.toFixed(2)}%</td>
-            <td><span className="risk-low">{row.risk}</span></td>
-            <td>{row.age}</td>
+    <WideTableFrame
+      t={t}
+      className="positions-table-frame"
+      controlsId="positions-horizontal-table"
+      label={t("table.positionsHorizontalScroll", "Positions table horizontal scroll")}
+    >
+      <table className="data-table positions-table" id="positions-horizontal-table">
+        <thead>
+          <tr>
+            <th>{t("common.symbol", "Symbol")}</th>
+            <th>{t("common.side", "Side")}</th>
+            <th>{t("common.size", "Size")}</th>
+            <th>{t("table.entry", "Entry")}</th>
+            <th>{t("table.mark", "Mark")}</th>
+            <th>{t("table.pnlUsdt", "PnL (USDT)")}</th>
+            <th>{t("table.pnlPct", "PnL (%)")}</th>
+            <th>{t("common.risk", "Risk")}</th>
+            <th>{t("table.age", "Age")}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.symbol}>
+              <th>{row.symbol}</th>
+              <td className="positive-text">{choiceLabel(t, row.side)}</td>
+              <td>{row.size}</td>
+              <td>{numberFormat.format(row.entry)}</td>
+              <td>{numberFormat.format(row.mark)}</td>
+              <td className="positive-text">+{formatMoney(row.pnl)}</td>
+              <td className="positive-text">+{row.pnlPct.toFixed(2)}%</td>
+              <td><span className="risk-low">{choiceLabel(t, row.risk)}</span></td>
+              <td>{row.age}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </WideTableFrame>
+  );
+}
+
+function WideTableFrame({ t, children, className = "", controlsId, label }) {
+  const scrollRef = useRef(null);
+  const railRef = useRef(null);
+  const [scrollState, setScrollState] = useState({ canScroll: false, left: 0, max: 0, thumbWidth: 100, thumbLeft: 0 });
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return undefined;
+    let animationFrame = 0;
+    const update = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        const max = Math.max(0, element.scrollWidth - element.clientWidth);
+        const ratio = max > 0 ? element.clientWidth / element.scrollWidth : 1;
+        const thumbWidth = Math.max(14, Math.min(100, ratio * 100));
+        setScrollState({
+          canScroll: max > 1,
+          left: element.scrollLeft,
+          max,
+          thumbWidth,
+          thumbLeft: max > 0 ? (element.scrollLeft / max) * (100 - thumbWidth) : 0,
+        });
+      });
+    };
+    update();
+    element.addEventListener("scroll", update, { passive: true });
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    resizeObserver?.observe(element);
+    if (element.firstElementChild) resizeObserver?.observe(element.firstElementChild);
+    window.addEventListener("resize", update);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      element.removeEventListener("scroll", update);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  const handleWheel = (event) => {
+    const element = scrollRef.current;
+    if (!element || scrollState.max <= 0) return;
+    const hasVerticalScroll = element.scrollHeight > element.clientHeight + 4;
+    const hasHorizontalGesture = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+    const shouldTranslateVerticalWheel = event.shiftKey || (!hasVerticalScroll && Math.abs(event.deltaY) > Math.abs(event.deltaX));
+    if (!hasHorizontalGesture && !shouldTranslateVerticalWheel) return;
+    event.preventDefault();
+    const delta = hasHorizontalGesture ? event.deltaX : event.deltaY + event.deltaX;
+    element.scrollLeft = Math.max(0, Math.min(scrollState.max, element.scrollLeft + delta));
+  };
+
+  const scrollToClientX = (clientX) => {
+    const element = scrollRef.current;
+    const rail = railRef.current;
+    if (!element || !rail || scrollState.max <= 0) return;
+    const rect = rail.getBoundingClientRect();
+    const thumbWidthPx = rect.width * (scrollState.thumbWidth / 100);
+    const usableWidth = Math.max(1, rect.width - thumbWidthPx);
+    const position = clientX - rect.left - thumbWidthPx / 2;
+    const nextLeft = (position / usableWidth) * scrollState.max;
+    element.scrollLeft = Math.max(0, Math.min(scrollState.max, nextLeft));
+  };
+
+  const handleRailPointerDown = (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    scrollToClientX(event.clientX);
+  };
+
+  const handleRailPointerMove = (event) => {
+    if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) return;
+    event.preventDefault();
+    scrollToClientX(event.clientX);
+  };
+
+  const handleRailKeyDown = (event) => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const step = Math.max(28, element.clientWidth * 0.18);
+    const pageStep = Math.max(64, element.clientWidth * 0.72);
+    const keySteps = {
+      ArrowLeft: -step,
+      ArrowRight: step,
+      PageUp: -pageStep,
+      PageDown: pageStep,
+      Home: -Infinity,
+      End: Infinity,
+    };
+    if (!(event.key in keySteps)) return;
+    event.preventDefault();
+    const delta = keySteps[event.key];
+    if (delta === -Infinity) {
+      element.scrollLeft = 0;
+      return;
+    }
+    if (delta === Infinity) {
+      element.scrollLeft = scrollState.max;
+      return;
+    }
+    element.scrollLeft = Math.max(0, Math.min(scrollState.max, element.scrollLeft + delta));
+  };
+
+  const ariaLabel = label || t("table.horizontalScroll", "Horizontal table scroll");
+
+  return (
+    <div
+      className={classNames(
+        "wide-table-frame",
+        scrollState.canScroll && "has-rail",
+        scrollState.left > 1 && "has-left-overflow",
+        scrollState.canScroll && scrollState.left < scrollState.max - 1 && "has-right-overflow",
+        className,
+      )}
+    >
+      <div className="wide-table-scroll" ref={scrollRef} onWheel={handleWheel}>
+        {children}
+      </div>
+      {scrollState.canScroll ? (
+        <div
+          className="wide-table-rail"
+          ref={railRef}
+          role="scrollbar"
+          tabIndex={0}
+          aria-orientation="horizontal"
+          aria-label={ariaLabel}
+          aria-controls={controlsId}
+          aria-valuemin={0}
+          aria-valuemax={Math.round(scrollState.max)}
+          aria-valuenow={Math.round(scrollState.left)}
+          onPointerDown={handleRailPointerDown}
+          onPointerMove={handleRailPointerMove}
+          onKeyDown={handleRailKeyDown}
+        >
+          <span className="wide-table-track" aria-hidden="true" />
+          <span
+            className="wide-table-thumb"
+            aria-hidden="true"
+            style={{
+              width: `${scrollState.thumbWidth}%`,
+              left: `${scrollState.thumbLeft}%`,
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 function OrdersTable({ t, rows }) {
   return (
-    <table className="data-table">
-      <thead>
-        <tr>
-          <th>{t("common.symbol", "Symbol")}</th>
-          <th>{t("common.side", "Side")}</th>
-          <th>{t("table.type", "Type")}</th>
-          <th>{t("common.size", "Size")}</th>
-          <th>{t("common.price", "Price")}</th>
-          <th>{t("common.status", "Status")}</th>
-          <th>{t("table.created", "Created")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={`${row.symbol}-${row.created}`}>
-            <th>{row.symbol}</th>
-            <td className={row.side === "Sell" ? "negative-text" : "positive-text"}>{row.side}</td>
-            <td>{row.type}</td>
-            <td>{row.size}</td>
-            <td>{numberFormat.format(row.price)}</td>
-            <td><span className="order-status">{row.status}</span></td>
-            <td>{row.created}</td>
+    <WideTableFrame
+      t={t}
+      className="orders-table-frame"
+      controlsId="orders-horizontal-table"
+      label={t("table.ordersHorizontalScroll", "Orders table horizontal scroll")}
+    >
+      <table className="data-table orders-table" id="orders-horizontal-table">
+        <thead>
+          <tr>
+            <th>{t("common.symbol", "Symbol")}</th>
+            <th>{t("common.side", "Side")}</th>
+            <th>{t("table.type", "Type")}</th>
+            <th>{t("common.size", "Size")}</th>
+            <th>{t("common.price", "Price")}</th>
+            <th>{t("common.status", "Status")}</th>
+            <th>{t("table.created", "Created")}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.symbol}-${row.created}`}>
+              <th>{row.symbol}</th>
+              <td className={row.side === "Sell" ? "negative-text" : "positive-text"}>{choiceLabel(t, row.side)}</td>
+              <td>{choiceLabel(t, row.type)}</td>
+              <td>{row.size}</td>
+              <td>{numberFormat.format(row.price)}</td>
+              <td><span className="order-status">{choiceLabel(t, row.status)}</span></td>
+              <td>{row.created}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </WideTableFrame>
   );
 }
 
@@ -4438,16 +5900,81 @@ function AutopilotStepsView({ t, rows }) {
                   <td>{formatConfidence(intent.confidence)}</td>
                   <td>
                     <span className={approved ? "risk-low" : rejected ? "order-status danger" : "order-status"}>
-                      {approved ? t("choices.ok", "ok") : rejected ? t("choices.reject", "reject") : row.status}
+                      {approved ? t("choices.ok", "ok") : rejected ? t("choices.reject", "reject") : statusText(t, row.status)}
                     </span>
                   </td>
-                  <td>{autopilotStepOutcome(row)}</td>
+                  <td>{eventText(t, autopilotStepOutcome(row))}</td>
                 </tr>
               );
             })
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function PaperResetDialog({ t, open, onClose, phrase, setPhrase, status, isResetting, onConfirm }) {
+  useEscapeToClose(open && !isResetting, onClose);
+  const dialogRef = useDialogFocus(open);
+  if (!open) return null;
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    onConfirm();
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !isResetting && onClose()}>
+      <section className="credential-modal paper-reset-modal" role="dialog" aria-modal="true" aria-labelledby="paper-reset-title" aria-describedby="paper-reset-copy" ref={dialogRef}>
+        <header className="credential-modal-header">
+          <div>
+            <h2 id="paper-reset-title">{t("panels.resetPaperTitle", "Reset paper ledger")}</h2>
+            <span><AlertTriangle size={13} /> {t("panels.resetPaperSubtitle", "Clear local paper execution history")}</span>
+          </div>
+          <button className="icon-close" type="button" onClick={onClose} aria-label={t("panels.resetPaperClose", "Close reset confirmation")} disabled={isResetting}>
+            <X size={16} />
+          </button>
+        </header>
+
+        <form className="paper-reset-body" onSubmit={handleSubmit}>
+          <div className="paper-reset-warning" id="paper-reset-copy">
+            <Trash2 size={18} />
+            <div>
+              <strong>{t("panels.resetPaperWarningTitle", "Local paper ledger will be cleared")}</strong>
+              <span>{t("panels.resetPaperWarningBody", "This removes saved paper execution rows from the local database. Strategy profiles, vault keys, and audit logs remain intact.")}</span>
+            </div>
+          </div>
+
+          <label className="field paper-reset-phrase">
+            <span>{t("panels.resetPaperPhraseLabel", "Confirmation phrase")}</span>
+            <input
+              data-autofocus
+              value={phrase}
+              onChange={(event) => setPhrase(event.target.value)}
+              placeholder={t("panels.resetPaperPhrasePlaceholder", "Type RESET PAPER")}
+              autoComplete="off"
+              spellCheck="false"
+              disabled={isResetting}
+            />
+          </label>
+
+          <div className={classNames("paper-reset-status", status?.tone)}>
+            <span>{statusText(t, status?.message || "Confirm reset")}</span>
+            <code>RESET PAPER</code>
+          </div>
+
+          <footer className="paper-reset-actions">
+            <button className="header-ghost-button" type="button" onClick={onClose} disabled={isResetting}>
+              {t("common.cancel", "Cancel")}
+            </button>
+            <button className="save-credential danger-confirm" type="submit" disabled={isResetting}>
+              <Trash2 size={13} />
+              {isResetting ? t("panels.resetting", "RESETTING") : t("panels.confirmReset", "Confirm reset")}
+            </button>
+          </footer>
+        </form>
+      </section>
     </div>
   );
 }
@@ -4521,14 +6048,14 @@ function PaperExecutionsTable({ t, rows }) {
                 <strong>{row.symbol}</strong>
                 <small>{formatDateTime(row.createdAt)} / {row.source}{row.runId ? ` #${row.runId}` : ""}</small>
               </th>
-              <td>{row.mode}</td>
+              <td>{choiceLabel(t, row.mode)}</td>
               <td className={row.side === "sell" ? "negative-text" : "positive-text"}>{choiceLabel(t, row.side)}</td>
               <td>{formatMoney(row.sizeUsdt)}</td>
               <td>{formatMoney(row.intentPrice)}</td>
               <td>
-                <span className={row.riskStatus === "approved" ? "risk-low" : "order-status"}>{row.riskStatus}</span>
+                <span className={row.riskStatus === "approved" ? "risk-low" : "order-status"}>{choiceLabel(t, row.riskStatus)}</span>
               </td>
-              <td>{row.fillStatus}</td>
+              <td>{choiceLabel(t, row.fillStatus)}</td>
               <td>{formatMoney(row.feeUsdt || 0)}</td>
             </tr>
           ))
@@ -4538,9 +6065,15 @@ function PaperExecutionsTable({ t, rows }) {
   );
 }
 
-function EventLog({ t, events, compact = false }) {
+function EventLog({ t, events, compact = false, autoScroll = true }) {
+  const logRef = useRef(null);
+  useEffect(() => {
+    if (!autoScroll || !logRef.current) return;
+    logRef.current.scrollTop = 0;
+  }, [autoScroll, compact, events]);
+
   return (
-    <div className={classNames("event-log", compact && "compact-log")}>
+    <div className={classNames("event-log", compact && "compact-log")} ref={logRef}>
       <table className="data-table">
         <thead>
           <tr>
@@ -4556,13 +6089,13 @@ function EventLog({ t, events, compact = false }) {
           {events.map((event, index) => (
             <tr key={`${event.time}-${event.type}-${index}`}>
               <td>{event.time}</td>
-              <td className={`${event.level}-text`}>{event.type}</td>
+              <td className={`${event.level}-text`}>{choiceLabel(t, event.type)}</td>
               <td>{event.symbol}</td>
-              {!compact ? <td className={event.action === "SELL" ? "negative-text" : event.action === "BUY" ? "positive-text" : ""}>{event.action}</td> : null}
+              {!compact ? <td className={event.action === "SELL" ? "negative-text" : event.action === "BUY" ? "positive-text" : ""}>{eventText(t, event.action)}</td> : null}
               <td>{event.price ? numberFormat.format(event.price) : "-"}</td>
               <td>
-                <strong>{event.result}</strong>
-                <small>{event.note}</small>
+                <strong>{eventText(t, event.result)}</strong>
+                <small>{eventText(t, event.note)}</small>
               </td>
             </tr>
           ))}

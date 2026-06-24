@@ -13,6 +13,7 @@
     "package:native:macos": "bash scripts/package-native-macos.sh",
     "package:native:windows": "pwsh -File scripts/package-native-windows.ps1",
     "smoke:local": "bash scripts/smoke-local.sh",
+    "ui:quality": "node scripts/ui-quality-check.mjs",
     "acceptance:env": "bash scripts/check-acceptance-env.sh",
     "acceptance:live": "bash scripts/acceptance-live.sh",
     "audit:final": "bash scripts/final-audit.sh",
@@ -29,5 +30,8 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "vite": "6.4.2"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
   }
 }

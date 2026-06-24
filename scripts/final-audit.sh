@@ -41,13 +41,20 @@ npm run verify:release
 echo "ok release verification"
 
 CURRENT_SMOKE_STATUS="skipped_not_running"
+CURRENT_UI_QUALITY_STATUS="skipped_not_running"
+CURRENT_UI_QUALITY_REPORT_PATH=""
 CURRENT_APP_INFO_PATH=""
 if curl -fsS "$CURRENT_URL/api/health" -o "$TMP_DIR/current-health.json" >/dev/null 2>&1; then
   CCVAR_SMOKE_URL="$CURRENT_URL" npm run smoke:local
+  CCVAR_UI_QUALITY_URL="$CURRENT_URL" \
+  CCVAR_UI_QUALITY_OUT_DIR="$OUT_DIR/ui-quality-current" \
+  npm run ui:quality
   curl -fsS "$CURRENT_URL/api/app-info" -o "$TMP_DIR/current-app-info.json"
   CURRENT_SMOKE_STATUS="passed"
+  CURRENT_UI_QUALITY_STATUS="passed"
+  CURRENT_UI_QUALITY_REPORT_PATH="$OUT_DIR/ui-quality-current/ui-quality-latest.json"
   CURRENT_APP_INFO_PATH="$TMP_DIR/current-app-info.json"
-  echo "ok current instance smoke"
+  echo "ok current instance smoke and UI quality"
 else
   echo "skip current instance smoke: $CURRENT_URL is not serving CCVar Quant"
 fi
@@ -149,6 +156,8 @@ ROOT_DIR="$ROOT_DIR" \
 REPORT_PATH="$REPORT_PATH" \
 CURRENT_URL="$CURRENT_URL" \
 CURRENT_SMOKE_STATUS="$CURRENT_SMOKE_STATUS" \
+CURRENT_UI_QUALITY_STATUS="$CURRENT_UI_QUALITY_STATUS" \
+CURRENT_UI_QUALITY_REPORT_PATH="$CURRENT_UI_QUALITY_REPORT_PATH" \
 CURRENT_APP_INFO_PATH="$CURRENT_APP_INFO_PATH" \
 REAL_ACCEPTANCE_RESULTS_PATH="$REAL_ACCEPTANCE_RESULTS_PATH" \
 REAL_ACCEPTANCE_READINESS_PATH="$REAL_ACCEPTANCE_READINESS_PATH" \
@@ -216,6 +225,7 @@ assert(qaEvidence.length >= 2, "QA screenshot evidence missing");
 let currentInstance = {
   url: process.env.CURRENT_URL,
   smokeStatus: process.env.CURRENT_SMOKE_STATUS,
+  uiQualityStatus: process.env.CURRENT_UI_QUALITY_STATUS,
 };
 if (process.env.CURRENT_APP_INFO_PATH) {
   const appInfo = readJSON(process.env.CURRENT_APP_INFO_PATH);
@@ -270,6 +280,7 @@ const report = {
     shellSyntax: "passed",
     verifyRelease: "passed",
     currentInstanceSmoke: currentInstance.smokeStatus,
+    currentInstanceUiQuality: currentInstance.uiQualityStatus,
   },
   release: {
     manifestVersion: manifest.manifestVersion,
@@ -285,6 +296,9 @@ const report = {
   },
   qaEvidence,
   currentInstance,
+  uiQualityEvidence: process.env.CURRENT_UI_QUALITY_REPORT_PATH && fs.existsSync(process.env.CURRENT_UI_QUALITY_REPORT_PATH)
+    ? fileInfo(path.relative(root, process.env.CURRENT_UI_QUALITY_REPORT_PATH))
+    : null,
   realSandboxCredentialReadiness,
   realSandboxAcceptance,
 };
