@@ -152,6 +152,8 @@ CCVar Quant Lab native macOS client
 
 Open "CCVar Quant Lab.app" for the standalone desktop client. It starts the local Go API and renders the UI in a native WKWebView window.
 
+The standalone client prefers http://127.0.0.1:8787/ and automatically chooses the next available loopback port when that default is already occupied, unless CCVAR_ADDR is set.
+
 Open "CCVar Quant Lab Web.app" if you prefer the browser launcher. It starts the same local Go API and opens http://127.0.0.1:8787/ in your default browser.
 
 Safety boundary:

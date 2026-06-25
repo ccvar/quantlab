@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using Microsoft.Web.WebView2.WinForms;
 
 namespace CCVarQuantLab;
@@ -37,7 +39,9 @@ internal sealed class QuantLabForm : Form
     protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        var address = Env("CCVAR_ADDR", DefaultAddress);
+        var configuredAddress = OptionalEnv("CCVAR_ADDR");
+        var requestedAddress = configuredAddress ?? DefaultAddress;
+        var address = BindAddressForLaunch(requestedAddress, configuredAddress is null);
         var url = $"http://{BrowserAddress(address)}/";
         var dbPath = Env("CCVAR_DB_PATH", Path.Combine(AppDataDir(), "ccvar_quant.db"));
         var logPath = Path.Combine(AppDataDir(), "logs", "client.log");
@@ -47,7 +51,13 @@ internal sealed class QuantLabForm : Form
             Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
             Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
             StartServer(address, dbPath, logPath);
-            if (!await WaitForHealth(url, TimeSpan.FromSeconds(20)))
+            await Task.Delay(150);
+            if (serverProcess is null || serverProcess.HasExited)
+            {
+                ShowError("Local server exited immediately", $"Check {logPath}");
+                return;
+            }
+            if (!await WaitForHealth(url, serverProcess, TimeSpan.FromSeconds(20)))
             {
                 ShowError("Local server did not become ready", $"Check {logPath}");
                 return;
@@ -98,13 +108,17 @@ internal sealed class QuantLabForm : Form
         serverProcess.BeginErrorReadLine();
     }
 
-    private static async Task<bool> WaitForHealth(string baseUrl, TimeSpan timeout)
+    private static async Task<bool> WaitForHealth(string baseUrl, Process process, TimeSpan timeout)
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         var deadline = DateTimeOffset.UtcNow.Add(timeout);
         var healthUrl = baseUrl.TrimEnd('/') + "/api/health";
         while (DateTimeOffset.UtcNow < deadline)
         {
+            if (process.HasExited)
+            {
+                return false;
+            }
             try
             {
                 var text = await client.GetStringAsync(healthUrl);
@@ -138,8 +152,75 @@ internal sealed class QuantLabForm : Form
 
     private static string Env(string key, string defaultValue)
     {
+        return OptionalEnv(key) ?? defaultValue;
+    }
+
+    private static string? OptionalEnv(string key)
+    {
         var value = Environment.GetEnvironmentVariable(key);
-        return string.IsNullOrWhiteSpace(value) ? defaultValue : value.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string BindAddressForLaunch(string requested, bool allowFallback)
+    {
+        if (!allowFallback || !TryParseIPv4HostPort(requested, out var host, out var port))
+        {
+            return requested;
+        }
+        if (host is not ("127.0.0.1" or "0.0.0.0" or "localhost"))
+        {
+            return requested;
+        }
+        for (var candidate = port; candidate < Math.Min(port + 40, 65535); candidate++)
+        {
+            if (CanBindTcp(host, candidate))
+            {
+                return $"{host}:{candidate}";
+            }
+        }
+        return requested;
+    }
+
+    private static bool TryParseIPv4HostPort(string address, out string host, out int port)
+    {
+        host = "";
+        port = 0;
+        var separator = address.LastIndexOf(':');
+        if (separator <= 0 || separator == address.Length - 1)
+        {
+            return false;
+        }
+        host = address[..separator];
+        if (host.Contains(':', StringComparison.Ordinal))
+        {
+            return false;
+        }
+        return int.TryParse(address[(separator + 1)..], out port) && port > 0 && port < 65535;
+    }
+
+    private static bool CanBindTcp(string host, int port)
+    {
+        var address = host switch
+        {
+            "0.0.0.0" => IPAddress.Any,
+            "localhost" => IPAddress.Loopback,
+            _ => IPAddress.TryParse(host, out var parsed) ? parsed : IPAddress.Loopback,
+        };
+        TcpListener? listener = null;
+        try
+        {
+            listener = new TcpListener(address, port);
+            listener.Start();
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+        finally
+        {
+            listener?.Stop();
+        }
     }
 
     private static string BrowserAddress(string address)

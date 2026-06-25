@@ -1,4 +1,5 @@
 import Cocoa
+import Darwin
 import Foundation
 import WebKit
 
@@ -54,7 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     private func startServerAndLoad() {
-        let address = environment("CCVAR_ADDR", defaultValue: defaultAddress)
+        let configuredAddress = optionalEnvironment("CCVAR_ADDR")
+        let requestedAddress = configuredAddress ?? defaultAddress
+        let address = bindAddressForLaunch(requestedAddress, allowFallback: configuredAddress == nil)
         let urlString = "http://\(browserAddress(address))/"
         let dbPath = environment("CCVAR_DB_PATH", defaultValue: defaultDBPath())
         let logPath = defaultLogPath()
@@ -104,6 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         try process.run()
         serverProcess = process
         ownsServerProcess = true
+        Thread.sleep(forTimeInterval: 0.15)
+        if !process.isRunning {
+            throw NSError(domain: "CCVarQuantLab", code: 3, userInfo: [NSLocalizedDescriptionKey: "local server exited immediately; check \(logPath)"])
+        }
     }
 
     private func waitForHealth(urlString: String) -> Bool {
@@ -112,6 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         }
         let deadline = Date().addingTimeInterval(healthTimeout)
         while Date() < deadline {
+            if let process = serverProcess, !process.isRunning {
+                return false
+            }
             if healthOK(url: url) {
                 return true
             }
@@ -152,8 +162,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 }
 
 private func environment(_ key: String, defaultValue: String) -> String {
+    optionalEnvironment(key) ?? defaultValue
+}
+
+private func optionalEnvironment(_ key: String) -> String? {
     let value = ProcessInfo.processInfo.environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return value.isEmpty ? defaultValue : value
+    return value.isEmpty ? nil : value
+}
+
+private func bindAddressForLaunch(_ requested: String, allowFallback: Bool) -> String {
+    guard allowFallback, let parsed = parseIPv4HostPort(requested) else {
+        return requested
+    }
+    let host = parsed.host
+    guard ["127.0.0.1", "0.0.0.0", "localhost"].contains(host) else {
+        return requested
+    }
+    for port in parsed.port..<(min(parsed.port + 40, 65535)) {
+        if canBindTCP(host: host == "localhost" ? "127.0.0.1" : host, port: port) {
+            return "\(host):\(port)"
+        }
+    }
+    return requested
+}
+
+private func parseIPv4HostPort(_ address: String) -> (host: String, port: Int)? {
+    let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let separator = trimmed.lastIndex(of: ":") else {
+        return nil
+    }
+    let host = String(trimmed[..<separator])
+    if host.isEmpty || host.contains(":") {
+        return nil
+    }
+    let portText = String(trimmed[trimmed.index(after: separator)...])
+    guard let port = Int(portText), port > 0, port < 65535 else {
+        return nil
+    }
+    return (host, port)
+}
+
+private func canBindTCP(host: String, port: Int) -> Bool {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    if fd < 0 {
+        return false
+    }
+    defer { close(fd) }
+
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = UInt16(port).bigEndian
+    if inet_pton(AF_INET, host, &address.sin_addr) != 1 {
+        return false
+    }
+
+    return withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+            bind(fd, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+        }
+    }
 }
 
 private func browserAddress(_ address: String) -> String {
