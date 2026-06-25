@@ -56,6 +56,21 @@ async function newPage(browser, theme, viewport, locale) {
     deviceScaleFactor: 1,
   });
   const errors = [];
+  page.on("response", async (response) => {
+    if (response.status() < 500) return;
+    let body = "";
+    try {
+      body = (await response.text()).slice(0, 400);
+    } catch {
+      body = "";
+    }
+    errors.push({
+      type: "http",
+      status: response.status(),
+      url: response.url(),
+      text: body,
+    });
+  });
   page.on("console", (message) => {
     if (["error", "warning"].includes(message.type())) {
       errors.push({ type: message.type(), text: message.text().slice(0, 400) });
@@ -170,17 +185,18 @@ async function assertNativeScrollbars(page, label, rootSelector = "body") {
   const reports = [];
   for (const targetIndex of targetIndexes) {
     const target = page.locator(selector).nth(targetIndex);
-    await page.mouse.move(1, 1);
-    await page.waitForTimeout(30);
+    await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+    await page.waitForTimeout(80);
     const beforeHover = await target.evaluate((element) => {
       const styles = getComputedStyle(element, "::-webkit-scrollbar");
       return {
         width: styles.width,
         height: styles.height,
+        overlayCount: document.querySelectorAll(".custom-scrollbar").length,
       };
     });
     await target.hover({ force: true });
-    await page.waitForTimeout(40);
+    await page.waitForTimeout(120);
     reports.push(await target.evaluate((element, beforeHover) => {
       const styles = getComputedStyle(element, "::-webkit-scrollbar");
       const elementStyles = getComputedStyle(element);
@@ -195,6 +211,21 @@ async function assertNativeScrollbars(page, label, rootSelector = "body") {
       const movedY = !hasY || element.scrollTop > originalTop;
       element.scrollLeft = originalLeft;
       element.scrollTop = originalTop;
+      const overlayBars = Array.from(document.querySelectorAll(".custom-scrollbar")).map((bar) => {
+        const barRect = bar.getBoundingClientRect();
+        const thumbRect = bar.querySelector(".custom-scrollbar-thumb")?.getBoundingClientRect();
+        const axis = bar.classList.contains("custom-scrollbar-x") ? "x" : "y";
+        return {
+          axis,
+          width: Number(barRect.width.toFixed(1)),
+          height: Number(barRect.height.toFixed(1)),
+          thumbWidth: thumbRect ? Number(thumbRect.width.toFixed(1)) : 0,
+          thumbHeight: thumbRect ? Number(thumbRect.height.toFixed(1)) : 0,
+          nearElement: axis === "x"
+            ? Math.abs(barRect.bottom - rect.bottom) <= 8 && barRect.left >= rect.left - 8 && barRect.right <= rect.right + 8
+            : Math.abs(barRect.right - rect.right) <= 8 && barRect.top >= rect.top - 8 && barRect.bottom <= rect.bottom + 8,
+        };
+      });
       return {
         tag: element.tagName,
         id: element.id || "",
@@ -205,8 +236,10 @@ async function assertNativeScrollbars(page, label, rootSelector = "body") {
         overflowY: elementStyles.overflowY,
         defaultWidth: beforeHover.width,
         defaultHeight: beforeHover.height,
+        defaultOverlayCount: beforeHover.overlayCount,
         hoverWidth: styles.width,
         hoverHeight: styles.height,
+        overlayBars,
         hasX,
         hasY,
         movedX,
@@ -224,21 +257,29 @@ async function assertNativeScrollbars(page, label, rootSelector = "body") {
     const defaultHeight = numericCssPx(entry.defaultHeight);
     const defaultXHidden = !entry.hasX || defaultHeight === null || defaultHeight <= 0.5;
     const defaultYHidden = !entry.hasY || defaultWidth === null || defaultWidth <= 0.5;
-    return !defaultXHidden || !defaultYHidden;
+    return !defaultXHidden || !defaultYHidden || entry.defaultOverlayCount !== 0;
   });
   const hoverRevealFailures = reports.filter((entry) => {
     const hoverWidth = numericCssPx(entry.hoverWidth);
     const hoverHeight = numericCssPx(entry.hoverHeight);
-    const hoverXVisible = !entry.hasX || (hoverHeight !== null && hoverHeight > 0.5);
-    const hoverYVisible = !entry.hasY || (hoverWidth !== null && hoverWidth > 0.5);
-    return !hoverXVisible || !hoverYVisible || !entry.movedX || !entry.movedY;
+    const nativeXHidden = !entry.hasX || hoverHeight === null || hoverHeight <= 0.5;
+    const nativeYHidden = !entry.hasY || hoverWidth === null || hoverWidth <= 0.5;
+    const xOverlay = entry.overlayBars.find((bar) => bar.axis === "x" && bar.nearElement);
+    const yOverlay = entry.overlayBars.find((bar) => bar.axis === "y" && bar.nearElement);
+    const overlayXVisible = !entry.hasX || Boolean(xOverlay);
+    const overlayYVisible = !entry.hasY || Boolean(yOverlay);
+    return !nativeXHidden || !nativeYHidden || !overlayXVisible || !overlayYVisible || !entry.movedX || !entry.movedY;
   });
   const oversized = reports.filter((entry) => (
-    scrollbarTooLarge({ width: entry.hoverWidth, height: entry.hoverHeight }, 3.5)
+    scrollbarTooLarge({ width: entry.hoverWidth, height: entry.hoverHeight }, 0.5) ||
+    entry.overlayBars.some((bar) => (
+      (bar.axis === "x" && (bar.height > 3.5 || bar.thumbHeight > 3.5)) ||
+      (bar.axis === "y" && (bar.width > 3.5 || bar.thumbWidth > 3.5))
+    ))
   ));
   assert(hiddenByDefaultFailures.length === 0, `${label} has scrollbars visible before hover`, hiddenByDefaultFailures);
-  assert(hoverRevealFailures.length === 0, `${label} has scrollable areas without hover-revealed working scrollbars`, hoverRevealFailures);
-  assert(oversized.length === 0, `${label} has scrollbars thicker than the experiment-runs standard`, oversized);
+  assert(hoverRevealFailures.length === 0, `${label} has scrollable areas without hover-revealed overlay scrollbars`, hoverRevealFailures);
+  assert(oversized.length === 0, `${label} has native scrollbars or overlay scrollbars thicker than the experiment-runs standard`, oversized);
   await page.mouse.move(1, 1);
   await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
   await page.waitForTimeout(40);

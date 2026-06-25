@@ -1029,6 +1029,243 @@ const defaultVaultTestForm = {
 };
 
 const chartTimeframes = ["1m", "5m", "15m", "1h", "4h", "1D"];
+const scrollbarOverflowPattern = /^(auto|scroll|overlay)$/;
+const overlayScrollbarIgnoreSelector = ".wide-table-scroll, .wide-table-rail, .custom-scrollbar-layer, .custom-scrollbar-layer *";
+
+function GlobalScrollbars() {
+  const [bars, setBars] = useState([]);
+  const activeElementRef = useRef(null);
+  const hideTimerRef = useRef(null);
+  const frameRef = useRef(0);
+  const dragRef = useRef(null);
+  const updateRef = useRef(() => {});
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const hide = () => {
+      if (hideTimerRef.current) {
+        window.clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      activeElementRef.current = null;
+      setBars([]);
+    };
+
+    const hideSoon = () => {
+      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = window.setTimeout(hide, 700);
+    };
+
+    const scrollableAxis = (element) => {
+      if (!(element instanceof HTMLElement)) return { x: false, y: false };
+      if (element.matches(overlayScrollbarIgnoreSelector)) return { x: false, y: false };
+      const styles = window.getComputedStyle(element);
+      const isRootScroller = element === document.scrollingElement || element === document.documentElement || element === document.body;
+      const rootAllowsX = isRootScroller && !/^(hidden|clip)$/.test(styles.overflowX);
+      const rootAllowsY = isRootScroller && !/^(hidden|clip)$/.test(styles.overflowY);
+      const x = (scrollbarOverflowPattern.test(styles.overflowX) || rootAllowsX) && element.scrollWidth > element.clientWidth + 2;
+      const y = (scrollbarOverflowPattern.test(styles.overflowY) || rootAllowsY) && element.scrollHeight > element.clientHeight + 2;
+      return { x, y };
+    };
+
+    const findScrollableElement = (target) => {
+      let element = target instanceof Element ? target : target?.parentElement;
+      if (element?.closest?.(".custom-scrollbar-layer")) return activeElementRef.current;
+      const allowRootFallback = Boolean(element?.closest?.(".modal-backdrop"));
+      while (element && element !== document.documentElement) {
+        const axis = scrollableAxis(element);
+        if (axis.x || axis.y) return element;
+        element = element.parentElement;
+      }
+      if (!allowRootFallback) return null;
+      const root = document.scrollingElement;
+      const rootAxis = scrollableAxis(root);
+      if (rootAxis.x || rootAxis.y) return root;
+      return null;
+    };
+
+    const measure = (element) => {
+      if (!(element instanceof HTMLElement) || !document.contains(element)) return [];
+      const rect = element.getBoundingClientRect();
+      const visible = rect.width > 8 && rect.height > 8 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+      if (!visible) return [];
+
+      const axis = scrollableAxis(element);
+      const next = [];
+      if (axis.y) {
+        const trackSize = Math.max(1, rect.height - 8);
+        const thumbSize = Math.max(28, trackSize * (element.clientHeight / element.scrollHeight));
+        const maxThumbOffset = Math.max(1, trackSize - thumbSize);
+        const scrollMax = Math.max(1, element.scrollHeight - element.clientHeight);
+        next.push({
+          axis: "y",
+          left: Math.min(window.innerWidth - 5, Math.max(2, rect.right - 5)),
+          top: Math.max(2, rect.top + 4),
+          width: 3,
+          height: trackSize,
+          thumbSize,
+          thumbOffset: (element.scrollTop / scrollMax) * maxThumbOffset,
+        });
+      }
+      if (axis.x) {
+        const trackSize = Math.max(1, rect.width - 8);
+        const thumbSize = Math.max(28, trackSize * (element.clientWidth / element.scrollWidth));
+        const maxThumbOffset = Math.max(1, trackSize - thumbSize);
+        const scrollMax = Math.max(1, element.scrollWidth - element.clientWidth);
+        next.push({
+          axis: "x",
+          left: Math.max(2, rect.left + 4),
+          top: Math.min(window.innerHeight - 5, Math.max(2, rect.bottom - 5)),
+          width: trackSize,
+          height: 3,
+          thumbSize,
+          thumbOffset: (element.scrollLeft / scrollMax) * maxThumbOffset,
+        });
+      }
+      return next;
+    };
+
+    const scheduleUpdate = () => {
+      if (frameRef.current) window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = window.requestAnimationFrame(() => {
+        frameRef.current = 0;
+        const element = activeElementRef.current;
+        setBars(element ? measure(element) : []);
+      });
+    };
+
+    const showFor = (element) => {
+      if (!element) {
+        hide();
+        return;
+      }
+      if (hideTimerRef.current) {
+        window.clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      activeElementRef.current = element;
+      scheduleUpdate();
+    };
+
+    const handlePointerMove = (event) => {
+      const drag = dragRef.current;
+      if (drag) {
+        const element = drag.element;
+        const pointer = drag.axis === "x" ? event.clientX : event.clientY;
+        const next = drag.startScroll + (pointer - drag.startPointer) * drag.ratio;
+        if (drag.axis === "x") {
+          element.scrollLeft = Math.max(0, Math.min(drag.maxScroll, next));
+        } else {
+          element.scrollTop = Math.max(0, Math.min(drag.maxScroll, next));
+        }
+        scheduleUpdate();
+        event.preventDefault();
+        return;
+      }
+      const element = findScrollableElement(event.target);
+      if (element) {
+        showFor(element);
+      } else {
+        hide();
+      }
+    };
+
+    const handlePointerActivate = (event) => {
+      if (dragRef.current) return;
+      const element = findScrollableElement(event.target);
+      if (element) showFor(element);
+    };
+
+    const handleScroll = (event) => {
+      const target = event.target === document ? document.scrollingElement : event.target;
+      const element = findScrollableElement(target);
+      if (!element || element !== activeElementRef.current) return;
+      scheduleUpdate();
+      hideSoon();
+    };
+
+    const handlePointerUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      scheduleUpdate();
+    };
+
+    updateRef.current = scheduleUpdate;
+    document.addEventListener("pointerover", handlePointerActivate, true);
+    document.addEventListener("pointerdown", handlePointerActivate, true);
+    document.addEventListener("pointermove", handlePointerMove, true);
+    document.addEventListener("scroll", handleScroll, true);
+    document.addEventListener("pointerup", handlePointerUp, true);
+    document.addEventListener("pointercancel", handlePointerUp, true);
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("blur", hide);
+
+    return () => {
+      document.removeEventListener("pointerover", handlePointerActivate, true);
+      document.removeEventListener("pointerdown", handlePointerActivate, true);
+      document.removeEventListener("pointermove", handlePointerMove, true);
+      document.removeEventListener("scroll", handleScroll, true);
+      document.removeEventListener("pointerup", handlePointerUp, true);
+      document.removeEventListener("pointercancel", handlePointerUp, true);
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("blur", hide);
+      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+      if (frameRef.current) window.cancelAnimationFrame(frameRef.current);
+    };
+  }, []);
+
+  function handlePointerDown(event) {
+    const element = activeElementRef.current;
+    const axis = event.currentTarget.dataset.axis;
+    if (!(element instanceof HTMLElement) || !axis) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const thumb = event.currentTarget.querySelector(".custom-scrollbar-thumb")?.getBoundingClientRect();
+    const trackSize = axis === "x" ? rect.width : rect.height;
+    const thumbSize = axis === "x" ? thumb?.width || 28 : thumb?.height || 28;
+    const maxScroll = axis === "x" ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight;
+    const maxTrack = Math.max(1, trackSize - thumbSize);
+    dragRef.current = {
+      axis,
+      element,
+      maxScroll,
+      ratio: maxScroll / maxTrack,
+      startPointer: axis === "x" ? event.clientX : event.clientY,
+      startScroll: axis === "x" ? element.scrollLeft : element.scrollTop,
+    };
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    updateRef.current();
+  }
+
+  if (bars.length === 0) return null;
+
+  return (
+    <div className="custom-scrollbar-layer" aria-hidden="true">
+      {bars.map((bar) => (
+        <div
+          key={bar.axis}
+          className={classNames("custom-scrollbar", `custom-scrollbar-${bar.axis}`)}
+          data-axis={bar.axis}
+          onPointerDown={handlePointerDown}
+          style={{
+            left: `${bar.left}px`,
+            top: `${bar.top}px`,
+            width: `${bar.width}px`,
+            height: `${bar.height}px`,
+          }}
+        >
+          <span
+            className="custom-scrollbar-thumb"
+            style={bar.axis === "x"
+              ? { width: `${bar.thumbSize}px`, transform: `translateX(${bar.thumbOffset}px)` }
+              : { height: `${bar.thumbSize}px`, transform: `translateY(${bar.thumbOffset}px)` }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function App() {
   const [locale, setLocale] = useState(() => {
@@ -2394,6 +2631,7 @@ export function App() {
 
   return (
     <>
+      <GlobalScrollbars />
       <main className={classNames("app-shell", (isStopped || isRunStopped) && "is-stopped")}>
         <TopBar
           t={t}
