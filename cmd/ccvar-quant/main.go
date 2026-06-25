@@ -36,6 +36,7 @@ import (
 	"ccvar.com/web3quant/internal/livereconcile"
 	"ccvar.com/web3quant/internal/livesync"
 	"ccvar.com/web3quant/internal/market"
+	"ccvar.com/web3quant/internal/netclient"
 	"ccvar.com/web3quant/internal/paperaccount"
 	"ccvar.com/web3quant/internal/risk"
 	"ccvar.com/web3quant/internal/simrun"
@@ -68,9 +69,16 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer store.Close()
+	marketHTTPClient := netclient.New(7 * time.Second)
+	privateHTTPClient := netclient.New(10 * time.Second)
+	log.Printf("Exchange HTTP proxy: %s", netclient.ProxySummary("https://www.okx.com/api/v5/public/time"))
+	binanceAdapter := binance.New()
+	binanceAdapter.Client = marketHTTPClient
+	okxAdapter := okx.New()
+	okxAdapter.Client = marketHTTPClient
 	registry := exchange.NewRegistry(
-		binance.New(),
-		okx.New(),
+		binanceAdapter,
+		okxAdapter,
 	)
 	marketService := market.Service{
 		Store:    store,
@@ -113,18 +121,18 @@ func main() {
 		log.Printf("Loopback private exchange mocks enabled: binance=%t okx=%t", privateMocks.BinanceBaseURL != "", privateMocks.OKXBaseURL != "")
 	}
 	liveExecutor := liveexec.New(store, registry, guard, map[string]liveexec.Executor{
-		"Binance": liveexec.BinanceExecutor{BaseURL: privateMocks.BinanceBaseURL},
-		"OKX":     liveexec.OKXExecutor{BaseURL: privateMocks.OKXBaseURL},
+		"Binance": liveexec.BinanceExecutor{BaseURL: privateMocks.BinanceBaseURL, Client: privateHTTPClient},
+		"OKX":     liveexec.OKXExecutor{BaseURL: privateMocks.OKXBaseURL, Client: privateHTTPClient},
 	})
 	liveExecutor.Halted = killSwitch.Active
 	liveExecutor.RiskProvider = riskProvider
 	accountSync := livesync.New(store, map[string]livesync.Client{
-		"Binance": livesync.BinanceClient{BaseURL: privateMocks.BinanceBaseURL},
-		"OKX":     livesync.OKXClient{BaseURL: privateMocks.OKXBaseURL},
+		"Binance": livesync.BinanceClient{BaseURL: privateMocks.BinanceBaseURL, Client: privateHTTPClient},
+		"OKX":     livesync.OKXClient{BaseURL: privateMocks.OKXBaseURL, Client: privateHTTPClient},
 	})
 	liveReconcile := livereconcile.New(store, map[string]livereconcile.Client{
-		"Binance": livereconcile.BinanceClient{BaseURL: privateMocks.BinanceBaseURL},
-		"OKX":     livereconcile.OKXClient{BaseURL: privateMocks.OKXBaseURL},
+		"Binance": livereconcile.BinanceClient{BaseURL: privateMocks.BinanceBaseURL, Client: privateHTTPClient},
+		"OKX":     livereconcile.OKXClient{BaseURL: privateMocks.OKXBaseURL, Client: privateHTTPClient},
 	})
 	autoPilot := autopilot.New(
 		store,

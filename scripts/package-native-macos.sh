@@ -169,6 +169,12 @@ Logs:
 Environment overrides:
   CCVAR_ADDR
   CCVAR_DB_PATH
+  CCVAR_EXCHANGE_PROXY
+
+Network note:
+  Exchange API calls use HTTP_PROXY / HTTPS_PROXY / ALL_PROXY when present.
+  The macOS client also auto-detects the macOS system proxy for OKX/Binance API calls.
+  Set CCVAR_EXCHANGE_PROXY=http://127.0.0.1:7897 to force a proxy, or CCVAR_EXCHANGE_PROXY=direct to force direct exchange connections.
 README
 cp "$NATIVE_RESOURCES_DIR/README.txt" "$WEB_RESOURCES_DIR/README.txt"
 cp docs/operator-runbook.zh-CN.md docs/safety.md "$NATIVE_DOCS_DIR/"

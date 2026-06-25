@@ -14,4 +14,5 @@ When implementing from a selected generated mock, treat that image as the source
 - GitHub Actions must build the embedded Web UI and package desktop clients for macOS and Windows.
 - macOS and Windows delivery must include both a standalone native desktop client and a browser-launcher entry; the native client should render the local Web UI inside the app window instead of opening an external browser.
 - Form and exchange/API errors must be normalized into localized, actionable messages; do not surface raw provider JSON or host-level errors in the UI.
+- Packaged desktop clients should keep exchange API networking aligned with the host network setup. On macOS, the Go backend must auto-detect system proxy settings when shell proxy environment variables are absent.
 - OKX Demo Trading uses the common `https://www.okx.com` API host with `x-simulated-trading: 1`; do not hard-code regional OKX domains as the default.

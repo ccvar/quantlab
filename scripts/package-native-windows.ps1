@@ -64,6 +64,11 @@ Logs:
 Environment overrides:
   CCVAR_ADDR
   CCVAR_DB_PATH
+  CCVAR_EXCHANGE_PROXY
+
+Network note:
+  Exchange API calls use HTTP_PROXY / HTTPS_PROXY / ALL_PROXY when present.
+  Set CCVAR_EXCHANGE_PROXY=http://127.0.0.1:7897 to force a proxy, or CCVAR_EXCHANGE_PROXY=direct to force direct exchange connections.
 "@ | Set-Content -Encoding ASCII (Join-Path $PackageDir "README.txt")
 
 Copy-Item (Join-Path $RootDir "docs/operator-runbook.zh-CN.md") $DocsDir

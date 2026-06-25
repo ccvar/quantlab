@@ -99,6 +99,10 @@ Environment variable equivalents are `CCVAR_ADDR`, `CCVAR_DB_PATH`, and `CCVAR_O
 
 If the client is launched with `--open` while another CCVar Quant instance is already serving the same address, the new process verifies `/api/health`, opens the existing browser URL, and exits cleanly. If the port is occupied by a different program, startup fails instead of attaching to it.
 
+Exchange API networking follows `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` when they are available. The packaged macOS client also auto-detects the macOS system proxy, which is important when a browser can open OKX/Binance through Clash/VPN but a Finder-launched app does not inherit shell proxy variables. Set `CCVAR_EXCHANGE_PROXY=http://127.0.0.1:7897` to force a proxy, or `CCVAR_EXCHANGE_PROXY=direct` to force direct exchange connections. Local API and loopback mock URLs always bypass the exchange proxy.
+
+中文代理说明：如果浏览器能打开 OKX/Binance，但客户端测试密钥提示网络不可达，通常是桌面 App 没有继承代理环境。macOS native 包会自动读取系统代理；也可以用 `CCVAR_EXCHANGE_PROXY` 显式指定交易所 API 代理。
+
 ## GitHub Actions
 
 The repository includes `.github/workflows/build-clients.yml`, `.github/workflows/native-desktop-clients.yml`, `.github/workflows/publish-release.yml`, and `.github/workflows/real-sandbox-acceptance.yml`.
