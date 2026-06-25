@@ -1378,6 +1378,8 @@ export function App() {
   const [isCredentialPanelOpen, setIsCredentialPanelOpen] = useState(false);
   const [credentialForm, setCredentialForm] = useState(defaultCredentialForm);
   const [isSavingCredential, setIsSavingCredential] = useState(false);
+  const [credentialDeleteCandidateId, setCredentialDeleteCandidateId] = useState(null);
+  const [deletingCredentialId, setDeletingCredentialId] = useState(null);
   const [vaultTestForm, setVaultTestForm] = useState(defaultVaultTestForm);
   const [vaultTestStatus, setVaultTestStatus] = useState({ tone: "warn", message: "Not tested" });
   const [vaultTestResult, setVaultTestResult] = useState(null);
@@ -1941,6 +1943,11 @@ export function App() {
     setIsCredentialPanelOpen(true);
   }
 
+  function closeCredentialPanel() {
+    setCredentialDeleteCandidateId(null);
+    setIsCredentialPanelOpen(false);
+  }
+
   function updateVaultTestForm(updater) {
     setVaultTestForm((current) => (typeof updater === "function" ? updater(current) : updater));
     if (!isTestingCredential) {
@@ -1973,17 +1980,33 @@ export function App() {
     }
   }
 
+  function handleCredentialDeleteRequest(id) {
+    if (deletingCredentialId) return;
+    setCredentialDeleteCandidateId(id);
+  }
+
+  function handleCredentialDeleteCancel() {
+    if (deletingCredentialId) return;
+    setCredentialDeleteCandidateId(null);
+  }
+
   async function handleCredentialDelete(id) {
+    if (deletingCredentialId) return;
+    setDeletingCredentialId(id);
     setCredentialStatus({ tone: "loading", message: "Deleting" });
     try {
       await deleteCredential(id);
       setCredentials((current) => current.filter((credential) => credential.id !== id));
+      setVaultTestForm((current) => (String(current.credentialId) === String(id) ? { ...current, credentialId: "" } : current));
+      setCredentialDeleteCandidateId(null);
       setCredentialStatus({ tone: "success", message: "Deleted" });
       notify(t("toast.credentialDeleted", "Credential deleted"), "success");
       await refreshPreflight();
     } catch (error) {
       setCredentialStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
       notifyError(notify, t, error, "credentialDelete");
+    } finally {
+      setDeletingCredentialId(null);
     }
   }
 
@@ -2853,7 +2876,7 @@ export function App() {
       <CredentialPanel
         t={t}
         open={isCredentialPanelOpen}
-        onClose={() => setIsCredentialPanelOpen(false)}
+        onClose={closeCredentialPanel}
         credentials={credentials}
         status={credentialStatus}
         form={credentialForm}
@@ -2865,7 +2888,11 @@ export function App() {
         testError={vaultTestError}
         onTest={handleVaultConnectionTest}
         onSave={handleCredentialSave}
-        onDelete={handleCredentialDelete}
+        onRequestDelete={handleCredentialDeleteRequest}
+        onCancelDelete={handleCredentialDeleteCancel}
+        onConfirmDelete={handleCredentialDelete}
+        deleteCandidateId={credentialDeleteCandidateId}
+        deletingCredentialId={deletingCredentialId}
         isSaving={isSavingCredential}
         isTesting={isTestingCredential}
       />
@@ -3081,7 +3108,11 @@ function CredentialPanel({
   testError,
   onTest,
   onSave,
-  onDelete,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
+  deleteCandidateId,
+  deletingCredentialId,
   isSaving,
   isTesting,
 }) {
@@ -3236,22 +3267,51 @@ function CredentialPanel({
                   <span>{t("vault.ready", "Vault ready")}</span>
                 </div>
               ) : (
-                credentials.map((credential) => (
-                  <article className="credential-row" key={credential.id}>
-                    <div>
-                      <strong>{credential.exchange}</strong>
-                      <span>{credential.label}</span>
-                    </div>
-                    <code>{credential.apiKeyMask}</code>
-                    <div className="permission-pills">
-                      <span>READ</span>
-                      {credential.permissions.trade ? <span>TRADE</span> : null}
-                    </div>
-                    <button type="button" onClick={() => onDelete(credential.id)} aria-label={t("vault.deleteKey", "Delete {label}", { label: credential.label })}>
-                      <Trash2 size={14} />
-                    </button>
-                  </article>
-                ))
+                credentials.map((credential) => {
+                  const confirmingDelete = String(deleteCandidateId) === String(credential.id);
+                  const deleting = String(deletingCredentialId) === String(credential.id);
+                  const deleteLabel = t("vault.deleteKey", "Delete {label}", { label: credential.label });
+                  return (
+                    <article className={classNames("credential-row", confirmingDelete && "confirming-delete")} key={credential.id}>
+                      <div>
+                        <strong>{credential.exchange}</strong>
+                        <span>{credential.label}</span>
+                      </div>
+                      <code>{credential.apiKeyMask}</code>
+                      <div className="permission-pills">
+                        <span>READ</span>
+                        {credential.permissions.trade ? <span>TRADE</span> : null}
+                      </div>
+                      <button
+                        className="credential-delete-button"
+                        type="button"
+                        onClick={() => onRequestDelete(credential.id)}
+                        aria-label={deleteLabel}
+                        title={deleteLabel}
+                        disabled={Boolean(deletingCredentialId)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                      {confirmingDelete ? (
+                        <div className="credential-delete-confirm" role="group" aria-label={t("vault.deleteConfirmTitle", "Delete saved key?")}>
+                          <div className="credential-delete-copy">
+                            <strong>{t("vault.deleteConfirmTitle", "Delete saved key?")}</strong>
+                            <span>{t("vault.deleteConfirmBody", "This removes only the local encrypted credential for {exchange} / {label}.", { exchange: credential.exchange, label: credential.label })}</span>
+                          </div>
+                          <div className="credential-delete-actions">
+                            <button className="credential-delete-cancel" type="button" onClick={onCancelDelete} disabled={deleting}>
+                              {t("common.cancel", "Cancel")}
+                            </button>
+                            <button className="credential-delete-confirm-button" type="button" onClick={() => onConfirmDelete(credential.id)} disabled={deleting}>
+                              {deleting ? <LoaderCircle size={12} /> : <Trash2 size={12} />}
+                              {deleting ? t("vault.deleting", "Deleting") : t("common.delete", "Delete")}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })
               )}
             </div>
 
@@ -3331,7 +3391,7 @@ function CredentialPanel({
                 />
               </label>
               <button
-                className="vault-test-button"
+                className={classNames("vault-test-button", isTesting && "is-testing")}
                 type="button"
                 onClick={onTest}
                 disabled={isTesting}

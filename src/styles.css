@@ -558,7 +558,9 @@
   .autopilot-card.running .autopilot-status.success,
   .chart-tools .run-action.is-running svg,
   .control-actions button.is-running svg,
-  .backtest-empty button:disabled svg {
+  .backtest-empty button:disabled svg,
+  .vault-test-button.is-testing svg,
+  .credential-delete-confirm-button:disabled svg {
     animation: none;
   }
 }
@@ -4511,11 +4513,18 @@ input[type="range"] {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: rgba(5, 13, 17, 0.45);
-  padding: 9px;
+  padding: 9px 42px 9px 9px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 7px 10px;
   align-items: center;
+  position: relative;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.credential-row.confirming-delete {
+  border-color: rgba(241, 94, 89, 0.28);
+  background: linear-gradient(180deg, rgba(241, 94, 89, 0.055), rgba(5, 13, 17, 0.45));
 }
 
 .credential-row strong,
@@ -4541,16 +4550,112 @@ input[type="range"] {
   font: 12px "IBM Plex Mono", monospace;
 }
 
-.credential-row button {
-  width: 28px;
-  height: 28px;
-  border: 1px solid rgba(241, 94, 89, 0.34);
-  border-radius: 5px;
-  background: var(--red-soft);
-  color: #ffaaa7;
+.credential-delete-button {
+  position: absolute;
+  right: 9px;
+  top: 10px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0.52;
   display: grid;
   place-items: center;
   cursor: pointer;
+  transition: opacity 0.16s ease, color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.credential-delete-button:hover:not(:disabled),
+.credential-delete-button:focus-visible,
+.credential-row.confirming-delete .credential-delete-button {
+  opacity: 1;
+  color: var(--red);
+  border-color: rgba(241, 94, 89, 0.22);
+  background: rgba(241, 94, 89, 0.08);
+}
+
+.credential-delete-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.credential-delete-confirm {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border: 1px solid rgba(241, 94, 89, 0.2);
+  border-radius: 6px;
+  background: rgba(241, 94, 89, 0.065);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.credential-delete-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.credential-delete-confirm strong {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.credential-delete-confirm span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.credential-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.credential-delete-cancel,
+.credential-delete-confirm-button {
+  height: 28px;
+  border-radius: 6px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.credential-delete-cancel {
+  border: 1px solid rgba(132, 162, 174, 0.18);
+  background: rgba(132, 162, 174, 0.08);
+  color: var(--muted);
+}
+
+.credential-delete-confirm-button {
+  border: 1px solid rgba(241, 94, 89, 0.32);
+  background: rgba(241, 94, 89, 0.1);
+  color: #ffb5b2;
+}
+
+.credential-delete-confirm-button svg {
+  flex: 0 0 auto;
+}
+
+.credential-delete-confirm-button:disabled svg {
+  animation: running-spin 1s linear infinite;
+}
+
+.credential-delete-cancel:disabled,
+.credential-delete-confirm-button:disabled {
+  opacity: 0.72;
+  cursor: progress;
 }
 
 .permission-pills {
@@ -4680,6 +4785,15 @@ input[type="range"] {
 .vault-test-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.vault-test-button.is-testing:disabled {
+  cursor: progress;
+}
+
+.vault-test-button.is-testing svg {
+  opacity: 0.9;
+  animation: running-spin 1s linear infinite;
 }
 
 .vault-test-summary {
@@ -6117,6 +6231,38 @@ input[type="range"] {
 :root[data-theme="light"] .credential-list,
 :root[data-theme="light"] .strategy-profile-body {
   background: rgba(247, 251, 252, 0.98);
+}
+
+:root[data-theme="light"] .credential-row {
+  background: rgba(255, 255, 255, 0.76);
+}
+
+:root[data-theme="light"] .credential-row.confirming-delete {
+  border-color: rgba(200, 49, 46, 0.2);
+  background: linear-gradient(180deg, rgba(200, 49, 46, 0.035), rgba(255, 255, 255, 0.78));
+}
+
+:root[data-theme="light"] .credential-delete-button {
+  color: #718690;
+}
+
+:root[data-theme="light"] .credential-delete-button:hover:not(:disabled),
+:root[data-theme="light"] .credential-delete-button:focus-visible,
+:root[data-theme="light"] .credential-row.confirming-delete .credential-delete-button {
+  color: #c8312e;
+  border-color: rgba(200, 49, 46, 0.18);
+  background: rgba(200, 49, 46, 0.055);
+}
+
+:root[data-theme="light"] .credential-delete-confirm {
+  border-color: rgba(200, 49, 46, 0.16);
+  background: rgba(200, 49, 46, 0.045);
+}
+
+:root[data-theme="light"] .credential-delete-confirm-button {
+  border-color: rgba(200, 49, 46, 0.22);
+  background: rgba(200, 49, 46, 0.06);
+  color: #c8312e;
 }
 
 :root[data-theme="light"] .live-guard-grid {
