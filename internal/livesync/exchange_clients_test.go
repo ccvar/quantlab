@@ -3,6 +3,7 @@ package livesync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,6 +129,30 @@ func TestBinanceClientSyncReportsTimestampWindowClearly(t *testing.T) {
 	}
 }
 
+func TestOKXClientSyncReportsNetworkUnavailableClearly(t *testing.T) {
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial tcp 169.254.0.2:443: connect: host is down")
+		}),
+	}
+	_, err := (OKXClient{Client: httpClient}).Sync(context.Background(), ClientRequest{
+		Environment: "demo",
+		Symbol:      "BTCUSDT",
+		Now:         fixedNow(),
+		Credential: vault.PlainCredential{
+			APIKey:        "OKXKEY123456",
+			Secret:        "OKXSECRET789",
+			APIPassphrase: "okx-api-passphrase",
+		},
+	})
+	if err == nil {
+		t.Fatal("Sync() error = nil")
+	}
+	if err.Error() != "okx network unavailable" {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
 func TestOKXClientSyncUsesDemoHeaderAndParsesPayload(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -206,4 +231,10 @@ func TestOKXClientSyncUsesDemoHeaderAndParsesPayload(t *testing.T) {
 	if len(snapshot.OpenOrders) != 1 || snapshot.OpenOrders[0].ClientOrderID != "CCVAR2" {
 		t.Fatalf("orders = %#v", snapshot.OpenOrders)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }

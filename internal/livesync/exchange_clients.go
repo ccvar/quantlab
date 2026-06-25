@@ -168,7 +168,7 @@ func (client OKXClient) Sync(ctx context.Context, request ClientRequest) (Accoun
 func doJSON(client *http.Client, req *http.Request) (any, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, exchangeNetworkError(req.URL.Host)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -231,6 +231,14 @@ func exchangeHTTPError(host, status string, body []byte) error {
 		return fmt.Errorf("%s returned %s: %s", exchange, status, message)
 	}
 	return fmt.Errorf("%s returned %s: %s", host, status, bodyText)
+}
+
+func exchangeNetworkError(host string) error {
+	exchange := exchangeNameFromHost(host)
+	if exchange != "" {
+		return fmt.Errorf("%s network unavailable", exchange)
+	}
+	return fmt.Errorf("exchange network unavailable")
 }
 
 func exchangeNameFromHost(host string) string {

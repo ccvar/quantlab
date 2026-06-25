@@ -38,7 +38,7 @@ func TestNewAuthenticatedRequestBuildsDemoHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuthenticatedRequest() error = %v", err)
 	}
-	if req.Method != http.MethodPost || req.URL.String() != "https://eea.okx.com/api/v5/trade/order" {
+	if req.Method != http.MethodPost || req.URL.String() != "https://www.okx.com/api/v5/trade/order" {
 		t.Fatalf("request = %s %s", req.Method, req.URL.String())
 	}
 	if req.Header.Get("OK-ACCESS-KEY") != "key" ||

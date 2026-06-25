@@ -249,6 +249,18 @@ function isRestrictedLocationError(raw, exchangePayload) {
   return text.includes("restricted location") || text.includes("eligibility");
 }
 
+function isExchangeNetworkError(raw) {
+  const text = String(raw || "").toLowerCase();
+  return (
+    text.includes("network unavailable") ||
+    text.includes("dial tcp") ||
+    text.includes("host is down") ||
+    text.includes("no such host") ||
+    text.includes("connection refused") ||
+    text.includes("connection reset")
+  );
+}
+
 const localizedErrorRules = [
   [/^method not allowed$/i, "errors.methodNotAllowed", "This action uses an unsupported request method."],
   [/^origin not allowed$/i, "errors.originNotAllowed", "This page origin is not allowed by the local API."],
@@ -324,6 +336,9 @@ function localizedErrorDetail(t, error) {
   }
   if (exchangeName && isRestrictedLocationError(raw, exchangePayload)) {
     return t("errors.exchangeRestrictedLocation", "{exchange} blocked this connection from the current network or region. Try a supported network or switch exchange environment.", { exchange: exchangeName });
+  }
+  if (exchangeName && isExchangeNetworkError(raw)) {
+    return t("errors.exchangeNetworkUnavailable", "{exchange} is unreachable from this network. Check DNS/proxy/VPN settings and try again.", { exchange: exchangeName });
   }
   if (exchangeName && exchangePayload) {
     return t("errors.exchangeReturned", "{exchange} returned {code}: {message}", {

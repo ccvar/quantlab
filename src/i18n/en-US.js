@@ -316,6 +316,7 @@ export const enUS = {
     timeout: "The request timed out. Check the exchange connection and try again.",
     binanceTimestampSkew: "Binance rejected the request timestamp. The client now signs with exchange server time first; if it still fails, turn on automatic system time sync and try again.",
     exchangeRestrictedLocation: "{exchange} blocked this connection from the current network or region. Confirm the test environment is available on this network, or switch to a supported network/exchange environment.",
+    exchangeNetworkUnavailable: "{exchange} is unreachable from this network. Check DNS, proxy/VPN, or outbound network settings and try again.",
     exchangeReturned: "{exchange} returned {code}: {message}",
     context: {
       generic: "Action failed: {message}",

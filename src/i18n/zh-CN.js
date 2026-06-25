@@ -316,6 +316,7 @@ export const zhCN = {
     timeout: "请求超时，请检查交易所连接后重试。",
     binanceTimestampSkew: "Binance 拒绝了本次请求时间戳。客户端已优先使用交易所服务器时间签名；如果仍失败，请开启系统自动校时后重试。",
     exchangeRestrictedLocation: "{exchange} 拒绝了当前网络或地区的访问。请确认测试网在当前网络可用，或切换到可访问的网络/交易所环境后重试。",
+    exchangeNetworkUnavailable: "当前网络无法连接 {exchange}。请检查 DNS、代理/VPN 或网络出口后重试。",
     exchangeReturned: "{exchange} 返回 {code}：{message}",
     context: {
       generic: "操作失败：{message}",

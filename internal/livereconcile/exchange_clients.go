@@ -153,7 +153,7 @@ func (client OKXClient) Reconcile(ctx context.Context, request ClientRequest) (R
 func doJSONMap(client *http.Client, req *http.Request) (map[string]any, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, exchangeNetworkError(req.URL.Host)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -171,6 +171,26 @@ func doJSONMap(client *http.Client, req *http.Request) (map[string]any, error) {
 		return nil, err
 	}
 	return raw, nil
+}
+
+func exchangeNetworkError(host string) error {
+	exchange := exchangeNameFromHost(host)
+	if exchange != "" {
+		return fmt.Errorf("%s network unavailable", exchange)
+	}
+	return fmt.Errorf("exchange network unavailable")
+}
+
+func exchangeNameFromHost(host string) string {
+	normalized := strings.ToLower(host)
+	switch {
+	case strings.Contains(normalized, "binance"):
+		return "binance"
+	case strings.Contains(normalized, "okx"):
+		return "okx"
+	default:
+		return ""
+	}
 }
 
 func firstOKXDataRow(raw map[string]any) map[string]any {

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const DemoBaseURL = "https://eea.okx.com"
+const DemoBaseURL = "https://www.okx.com"
 
 type AuthCredentials struct {
 	APIKey        string

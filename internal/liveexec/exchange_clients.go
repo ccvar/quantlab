@@ -72,7 +72,7 @@ func (executor BinanceExecutor) Execute(ctx context.Context, request ExecuteRequ
 	sentAt := time.Now().UTC()
 	resp, err := client.Do(signed)
 	if err != nil {
-		return ExecutionReport{}, err
+		return ExecutionReport{}, fmt.Errorf("binance network unavailable")
 	}
 	defer resp.Body.Close()
 	raw, err := decodeResponse(resp.Body)
@@ -153,7 +153,7 @@ func (executor OKXExecutor) Execute(ctx context.Context, request ExecuteRequest)
 	sentAt := time.Now().UTC()
 	resp, err := client.Do(req)
 	if err != nil {
-		return ExecutionReport{}, err
+		return ExecutionReport{}, fmt.Errorf("okx network unavailable")
 	}
 	defer resp.Body.Close()
 	raw, err := decodeResponse(resp.Body)
