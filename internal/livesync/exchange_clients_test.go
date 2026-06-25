@@ -15,17 +15,26 @@ func TestBinanceClientSyncSignsAccountAndOpenOrders(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		if r.Header.Get("X-MBX-APIKEY") != "BINANCEKEY123456" {
-			t.Errorf("missing Binance API key header")
-		}
-		if r.URL.Query().Get("signature") == "" || r.URL.Query().Get("timestamp") == "" {
-			t.Errorf("missing signed query in %s", r.URL.RawQuery)
+		if r.URL.Path != "/api/v3/time" {
+			if r.Header.Get("X-MBX-APIKEY") != "BINANCEKEY123456" {
+				t.Errorf("missing Binance API key header")
+			}
+			if r.URL.Query().Get("signature") == "" || r.URL.Query().Get("timestamp") == "" {
+				t.Errorf("missing signed query in %s", r.URL.RawQuery)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/api/v3/time":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"serverTime": 1782057000000,
+			})
 		case "/api/v3/account":
 			if r.URL.Query().Get("omitZeroBalances") != "true" {
 				t.Errorf("omitZeroBalances = %q", r.URL.Query().Get("omitZeroBalances"))
+			}
+			if r.URL.Query().Get("timestamp") != "1782057000000" {
+				t.Errorf("timestamp = %q", r.URL.Query().Get("timestamp"))
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"accountType": "SPOT",
@@ -71,7 +80,7 @@ func TestBinanceClientSyncSignsAccountAndOpenOrders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
-	if strings.Join(paths, ",") != "/api/v3/account,/api/v3/openOrders" {
+	if strings.Join(paths, ",") != "/api/v3/time,/api/v3/account,/api/v3/openOrders" {
 		t.Fatalf("paths = %#v", paths)
 	}
 	if snapshot.AccountType != "SPOT" || !snapshot.CanTrade || len(snapshot.Balances) != 1 || snapshot.Balances[0].Total != 1003 {
@@ -79,6 +88,43 @@ func TestBinanceClientSyncSignsAccountAndOpenOrders(t *testing.T) {
 	}
 	if len(snapshot.OpenOrders) != 1 || snapshot.OpenOrders[0].ClientOrderID != "CCVAR1" {
 		t.Fatalf("orders = %#v", snapshot.OpenOrders)
+	}
+}
+
+func TestBinanceClientSyncReportsTimestampWindowClearly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v3/time":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"serverTime": 1782057000000,
+			})
+		case "/api/v3/account":
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": -1021,
+				"msg":  "Timestamp for this request is outside of the recvWindow.",
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	_, err := (BinanceClient{BaseURL: server.URL, Client: server.Client()}).Sync(context.Background(), ClientRequest{
+		Environment: "testnet",
+		Symbol:      "BTCUSDT",
+		Now:         fixedNow(),
+		Credential: vault.PlainCredential{
+			APIKey: "BINANCEKEY123456",
+			Secret: "BINANCESECRET789",
+		},
+	})
+	if err == nil {
+		t.Fatal("Sync() error = nil")
+	}
+	if err.Error() != "binance timestamp outside receive window" {
+		t.Fatalf("error = %q", err.Error())
 	}
 }
 

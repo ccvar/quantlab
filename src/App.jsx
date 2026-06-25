@@ -155,6 +155,7 @@ const statusMessageKeys = new Map([
   ["API unavailable", "status.api_unavailable"],
   ["Market data timeout", "status.market_data_timeout"],
   ["Network error", "status.network_error"],
+  ["Connection failed", "status.connection_failed"],
   ["Exporting", "status.exporting"],
   ["Failed", "status.failed"],
   ["Pruning", "status.pruning"],
@@ -213,6 +214,39 @@ function sanitizeErrorMessage(message) {
   return String(message || "")
     .replace(/((?:api[_\s-]?key|api[_\s-]?secret|secret|passphrase|token)\s*[:=]\s*)(["']?)[^\s,;]+/gi, "$1$2***")
     .trim();
+}
+
+function exchangeNameFromError(message) {
+  const raw = String(message || "").toLowerCase();
+  if (raw.includes("binance")) return "BINANCE";
+  if (raw.includes("okx")) return "OKX";
+  return "";
+}
+
+function exchangePayloadFromError(message) {
+  const raw = String(message || "");
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const payload = JSON.parse(raw.slice(start, end + 1));
+    return {
+      code: payload?.code === undefined ? "" : String(payload.code),
+      message: String(payload?.msg || payload?.message || payload?.error || "").trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isBinanceTimestampError(raw, exchangePayload) {
+  const text = `${raw || ""} ${exchangePayload?.message || ""}`.toLowerCase();
+  return exchangePayload?.code === "-1021" || text.includes("recvwindow") || text.includes("outside receive window");
+}
+
+function isRestrictedLocationError(raw, exchangePayload) {
+  const text = `${raw || ""} ${exchangePayload?.message || ""}`.toLowerCase();
+  return text.includes("restricted location") || text.includes("eligibility");
 }
 
 const localizedErrorRules = [
@@ -282,6 +316,22 @@ const localizedErrorRules = [
 function localizedErrorDetail(t, error) {
   const raw = sanitizeErrorMessage(rawErrorMessage(error));
   if (!raw) return t("errors.generic", "Something went wrong. Try again.");
+
+  const exchangeName = exchangeNameFromError(raw);
+  const exchangePayload = exchangePayloadFromError(raw);
+  if (exchangeName === "BINANCE" && isBinanceTimestampError(raw, exchangePayload)) {
+    return t("errors.binanceTimestampSkew", "Binance rejected the request timestamp. Turn on automatic system time sync, then try again.");
+  }
+  if (exchangeName && isRestrictedLocationError(raw, exchangePayload)) {
+    return t("errors.exchangeRestrictedLocation", "{exchange} blocked this connection from the current network or region. Try a supported network or switch exchange environment.", { exchange: exchangeName });
+  }
+  if (exchangeName && exchangePayload) {
+    return t("errors.exchangeReturned", "{exchange} returned {code}: {message}", {
+      exchange: exchangeName,
+      code: exchangePayload.code || "-",
+      message: exchangePayload.message || "-",
+    });
+  }
 
   const jsonField = raw.match(/^json: unknown field "([^"]+)"$/i);
   if (jsonField) {
@@ -1316,6 +1366,7 @@ export function App() {
   const [vaultTestForm, setVaultTestForm] = useState(defaultVaultTestForm);
   const [vaultTestStatus, setVaultTestStatus] = useState({ tone: "warn", message: "Not tested" });
   const [vaultTestResult, setVaultTestResult] = useState(null);
+  const [vaultTestError, setVaultTestError] = useState("");
   const [isTestingCredential, setIsTestingCredential] = useState(false);
   const [liveGuard, setLiveGuard] = useState({ unlocked: false, message: "loading" });
   const [auditLog, setAuditLog] = useState({ entries: [], verification: { valid: true, checked: 0 } });
@@ -1875,6 +1926,15 @@ export function App() {
     setIsCredentialPanelOpen(true);
   }
 
+  function updateVaultTestForm(updater) {
+    setVaultTestForm((current) => (typeof updater === "function" ? updater(current) : updater));
+    if (!isTestingCredential) {
+      setVaultTestResult(null);
+      setVaultTestError("");
+      setVaultTestStatus({ tone: "warn", message: "Not tested" });
+    }
+  }
+
   async function handleCredentialSave(event) {
     event.preventDefault();
     setIsSavingCredential(true);
@@ -1914,6 +1974,8 @@ export function App() {
 
   async function handleVaultConnectionTest() {
     if (isTestingCredential) return;
+    setVaultTestResult(null);
+    setVaultTestError("");
     const credential = credentials.find((item) => String(item.id) === String(vaultTestForm.credentialId));
     if (!credential) {
       setVaultTestStatus({ tone: "warn", message: "Select key" });
@@ -1938,6 +2000,7 @@ export function App() {
         operator: liveGuardForm.operator || "local",
       });
       setVaultTestResult(result);
+      setVaultTestError("");
       setVaultTestStatus({
         tone: result.snapshot?.canTrade ? "success" : "warn",
         message: `${result.snapshot?.canTrade ? "Can trade" : "Read only"} · ${result.snapshot?.balances?.length || 0}/${result.snapshot?.openOrders?.length || 0}`,
@@ -1959,7 +2022,8 @@ export function App() {
       notify(t("toast.connectionTested", "Connection test finished"), result.snapshot?.canTrade ? "success" : "warn");
     } catch (error) {
       setVaultTestResult(null);
-      setVaultTestStatus({ tone: "danger", message: localizedErrorDetail(t, error) });
+      setVaultTestError(localizedErrorDetail(t, error));
+      setVaultTestStatus({ tone: "danger", message: "Connection failed" });
       notifyError(notify, t, error, "vaultTest");
       await refreshAuditLog();
       await refreshPreflight();
@@ -2780,9 +2844,10 @@ export function App() {
         form={credentialForm}
         setForm={setCredentialForm}
         testForm={vaultTestForm}
-        setTestForm={setVaultTestForm}
+        setTestForm={updateVaultTestForm}
         testStatus={vaultTestStatus}
         testResult={vaultTestResult}
+        testError={vaultTestError}
         onTest={handleVaultConnectionTest}
         onSave={handleCredentialSave}
         onDelete={handleCredentialDelete}
@@ -2998,6 +3063,7 @@ function CredentialPanel({
   setTestForm,
   testStatus,
   testResult,
+  testError,
   onTest,
   onSave,
   onDelete,
@@ -3180,6 +3246,15 @@ function CredentialPanel({
                 <strong>{t("vault.connectionTest", "Connection Test")}</strong>
                 <span className={classNames("vault-status", testStatus.tone)}>{statusText(t, testStatus.message)}</span>
               </div>
+              {testError ? (
+                <div className="vault-test-alert danger" role="alert">
+                  <AlertTriangle size={14} />
+                  <div>
+                    <strong>{t("vault.connectionIssue", "Connection issue")}</strong>
+                    <span>{testError}</span>
+                  </div>
+                </div>
+              ) : null}
               <label className="field">
                 <span>{t("vault.credential", "Credential")}</span>
                 <select

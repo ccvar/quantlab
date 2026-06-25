@@ -4618,6 +4618,39 @@ input[type="range"] {
   white-space: nowrap;
 }
 
+.vault-test-alert {
+  border: 1px solid rgba(255, 95, 95, 0.26);
+  border-radius: 6px;
+  background: rgba(255, 95, 95, 0.08);
+  color: var(--text);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 9px;
+}
+
+.vault-test-alert svg {
+  color: var(--red);
+  margin-top: 2px;
+}
+
+.vault-test-alert strong {
+  display: block;
+  color: var(--red);
+  font-size: 11px;
+  line-height: 1.3;
+  margin-bottom: 3px;
+}
+
+.vault-test-alert span {
+  display: block;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .vault-test-button {
   width: 100%;
   height: 34px;
@@ -5990,6 +6023,15 @@ input[type="range"] {
 
 :root[data-theme="light"] .vault-test-head svg {
   color: #607783;
+}
+
+:root[data-theme="light"] .vault-test-alert {
+  border-color: rgba(218, 57, 57, 0.24);
+  background: rgba(255, 95, 95, 0.07);
+}
+
+:root[data-theme="light"] .vault-test-alert span {
+  color: #223842;
 }
 
 :root[data-theme="light"] .vault-test-button {

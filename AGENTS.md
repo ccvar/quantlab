@@ -13,3 +13,4 @@ When implementing from a selected generated mock, treat that image as the source
 - Initial exchange scope is Binance Spot Testnet/Demo and OKX Demo Trading; production/mainnet trading remains disabled until real sandbox acceptance is completed.
 - GitHub Actions must build the embedded Web UI and package desktop clients for macOS and Windows.
 - macOS and Windows delivery must include both a standalone native desktop client and a browser-launcher entry; the native client should render the local Web UI inside the app window instead of opening an external browser.
+- Form and exchange/API errors must be normalized into localized, actionable messages; do not surface raw provider JSON or host-level errors in the UI.

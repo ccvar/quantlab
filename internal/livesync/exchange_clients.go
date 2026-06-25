@@ -41,6 +41,10 @@ func (client BinanceClient) Sync(ctx context.Context, request ClientRequest) (Ac
 			baseURL = binance.SpotTestnetBaseURL
 		}
 	}
+	timestamp := request.Now
+	if serverTime, err := binanceServerTime(ctx, httpClient, baseURL); err == nil {
+		timestamp = serverTime
+	}
 	accountReq, err := binance.NewSignedRequest(ctx, http.MethodGet, binance.SignedRequestConfig{
 		BaseURL: baseURL,
 		APIKey:  request.Credential.APIKey,
@@ -49,7 +53,7 @@ func (client BinanceClient) Sync(ctx context.Context, request ClientRequest) (Ac
 		Params: []binance.OrderedParam{
 			{Key: "omitZeroBalances", Value: "true"},
 		},
-		Timestamp: request.Now,
+		Timestamp: timestamp,
 	})
 	if err != nil {
 		return AccountSnapshot{}, err
@@ -71,7 +75,7 @@ func (client BinanceClient) Sync(ctx context.Context, request ClientRequest) (Ac
 		Params: []binance.OrderedParam{
 			{Key: "symbol", Value: binanceSymbol(request.Symbol)},
 		},
-		Timestamp: request.Now,
+		Timestamp: timestamp,
 	})
 	if err != nil {
 		return AccountSnapshot{}, err
@@ -172,7 +176,7 @@ func doJSON(client *http.Client, req *http.Request) (any, error) {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s returned %s: %s", req.URL.Host, resp.Status, strings.TrimSpace(string(body)))
+		return nil, exchangeHTTPError(req.URL.Host, resp.Status, body)
 	}
 	if len(strings.TrimSpace(string(body))) == 0 {
 		return map[string]any{}, nil
@@ -182,6 +186,63 @@ func doJSON(client *http.Client, req *http.Request) (any, error) {
 		return nil, err
 	}
 	return raw, nil
+}
+
+func binanceServerTime(ctx context.Context, client *http.Client, baseURL string) (time.Time, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/v3/time", nil)
+	if err != nil {
+		return time.Time{}, err
+	}
+	raw, err := doJSON(client, req)
+	if err != nil {
+		return time.Time{}, err
+	}
+	payload, ok := raw.(map[string]any)
+	if !ok {
+		return time.Time{}, fmt.Errorf("unexpected binance time payload")
+	}
+	serverTime, ok := parseAnyMilli(payload["serverTime"])
+	if !ok {
+		return time.Time{}, fmt.Errorf("binance server time missing")
+	}
+	return serverTime, nil
+}
+
+func exchangeHTTPError(host, status string, body []byte) error {
+	payload := map[string]any{}
+	bodyText := strings.TrimSpace(string(body))
+	code := ""
+	message := ""
+	if err := json.Unmarshal(body, &payload); err == nil {
+		code = stringValue(payload["code"])
+		message = strings.TrimSpace(firstString(payload["msg"], payload["message"], payload["error"]))
+	}
+	if message == "" {
+		message = bodyText
+	}
+	exchange := exchangeNameFromHost(host)
+	if code == "-1021" || strings.Contains(strings.ToLower(message), "recvwindow") {
+		return fmt.Errorf("binance timestamp outside receive window")
+	}
+	if exchange != "" && code != "" {
+		return fmt.Errorf("%s returned code %s: %s", exchange, code, message)
+	}
+	if exchange != "" && message != "" {
+		return fmt.Errorf("%s returned %s: %s", exchange, status, message)
+	}
+	return fmt.Errorf("%s returned %s: %s", host, status, bodyText)
+}
+
+func exchangeNameFromHost(host string) string {
+	normalized := strings.ToLower(host)
+	switch {
+	case strings.Contains(normalized, "binance"):
+		return "binance"
+	case strings.Contains(normalized, "okx"):
+		return "okx"
+	default:
+		return ""
+	}
 }
 
 func parseBinanceAccount(raw any) (AccountSnapshot, error) {
@@ -359,6 +420,27 @@ func parseAnyFloat(value any) float64 {
 	default:
 		return 0
 	}
+}
+
+func parseAnyMilli(value any) (time.Time, bool) {
+	raw := stringValue(value)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	millis, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || millis <= 0 {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(millis), true
+}
+
+func firstString(values ...any) string {
+	for _, value := range values {
+		if result := stringValue(value); strings.TrimSpace(result) != "" {
+			return result
+		}
+	}
+	return ""
 }
 
 func stringValue(value any) string {
