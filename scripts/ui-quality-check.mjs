@@ -142,13 +142,27 @@ function scrollbarTooLarge(entry, maxPx) {
   return (width !== null && width > maxPx) || (height !== null && height > maxPx);
 }
 
-async function assertNativeScrollbars(page, label) {
-  const selector = nativeScrollTargets;
+async function assertNativeScrollbars(page, label, rootSelector = "body") {
+  const selector = rootSelector === "body" ? "body *" : `${rootSelector}, ${rootSelector} *`;
   const targetIndexes = await page.evaluate((candidateSelector) => {
     return Array.from(document.querySelectorAll(candidateSelector)).map((element, index) => {
+      if (element.matches(".wide-table-scroll")) return -1;
+      const rect = element.getBoundingClientRect();
+      const styles = getComputedStyle(element);
+      const visible = styles.display !== "none" &&
+        styles.visibility !== "hidden" &&
+        rect.width > 1 &&
+        rect.height > 1 &&
+        rect.bottom > 0 &&
+        rect.top < window.innerHeight &&
+        rect.right > 0 &&
+        rect.left < window.innerWidth;
+      if (!visible) return -1;
+      const canScrollY = /^(auto|scroll|overlay)$/.test(styles.overflowY);
+      const canScrollX = /^(auto|scroll|overlay)$/.test(styles.overflowX);
       const hasY = element.scrollHeight > element.clientHeight + 2;
       const hasX = element.scrollWidth > element.clientWidth + 2;
-      return hasY || hasX ? index : -1;
+      return (canScrollY && hasY) || (canScrollX && hasX) ? index : -1;
     }).filter((index) => index >= 0);
   }, selector);
   if (targetIndexes.length === 0) return null;
@@ -156,6 +170,8 @@ async function assertNativeScrollbars(page, label) {
   const reports = [];
   for (const targetIndex of targetIndexes) {
     const target = page.locator(selector).nth(targetIndex);
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(30);
     const beforeHover = await target.evaluate((element) => {
       const styles = getComputedStyle(element, "::-webkit-scrollbar");
       return {
@@ -167,9 +183,10 @@ async function assertNativeScrollbars(page, label) {
     await page.waitForTimeout(40);
     reports.push(await target.evaluate((element, beforeHover) => {
       const styles = getComputedStyle(element, "::-webkit-scrollbar");
+      const elementStyles = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      const hasX = element.scrollWidth > element.clientWidth + 2;
-      const hasY = element.scrollHeight > element.clientHeight + 2;
+      const hasX = /^(auto|scroll|overlay)$/.test(elementStyles.overflowX) && element.scrollWidth > element.clientWidth + 2;
+      const hasY = /^(auto|scroll|overlay)$/.test(elementStyles.overflowY) && element.scrollHeight > element.clientHeight + 2;
       const originalLeft = element.scrollLeft;
       const originalTop = element.scrollTop;
       if (hasX) element.scrollLeft = Math.min(12, element.scrollWidth - element.clientWidth);
@@ -179,7 +196,13 @@ async function assertNativeScrollbars(page, label) {
       element.scrollLeft = originalLeft;
       element.scrollTop = originalTop;
       return {
+        tag: element.tagName,
+        id: element.id || "",
         className: String(element.className || element.tagName),
+        ariaLabel: element.getAttribute("aria-label") || "",
+        role: element.getAttribute("role") || "",
+        overflowX: elementStyles.overflowX,
+        overflowY: elementStyles.overflowY,
         defaultWidth: beforeHover.width,
         defaultHeight: beforeHover.height,
         hoverWidth: styles.width,
@@ -196,19 +219,26 @@ async function assertNativeScrollbars(page, label) {
       };
     }, beforeHover));
   }
-  const missingOrStatic = reports.filter((entry) => {
+  const hiddenByDefaultFailures = reports.filter((entry) => {
     const defaultWidth = numericCssPx(entry.defaultWidth);
     const defaultHeight = numericCssPx(entry.defaultHeight);
-    const defaultXVisible = !entry.hasX || (defaultHeight !== null && defaultHeight > 0);
-    const defaultYVisible = !entry.hasY || (defaultWidth !== null && defaultWidth > 0);
-    return !defaultXVisible || !defaultYVisible || !entry.movedX || !entry.movedY;
+    const defaultXHidden = !entry.hasX || defaultHeight === null || defaultHeight <= 0.5;
+    const defaultYHidden = !entry.hasY || defaultWidth === null || defaultWidth <= 0.5;
+    return !defaultXHidden || !defaultYHidden;
+  });
+  const hoverRevealFailures = reports.filter((entry) => {
+    const hoverWidth = numericCssPx(entry.hoverWidth);
+    const hoverHeight = numericCssPx(entry.hoverHeight);
+    const hoverXVisible = !entry.hasX || (hoverHeight !== null && hoverHeight > 0.5);
+    const hoverYVisible = !entry.hasY || (hoverWidth !== null && hoverWidth > 0.5);
+    return !hoverXVisible || !hoverYVisible || !entry.movedX || !entry.movedY;
   });
   const oversized = reports.filter((entry) => (
-    scrollbarTooLarge({ width: entry.defaultWidth, height: entry.defaultHeight }, 4.5) ||
-    scrollbarTooLarge({ width: entry.hoverWidth, height: entry.hoverHeight }, 5.5)
+    scrollbarTooLarge({ width: entry.hoverWidth, height: entry.hoverHeight }, 3.5)
   ));
-  assert(missingOrStatic.length === 0, `${label} has scrollable areas without visible working scrollbars`, missingOrStatic);
-  assert(oversized.length === 0, `${label} has scrollbars thicker than the compact native style`, oversized);
+  assert(hiddenByDefaultFailures.length === 0, `${label} has scrollbars visible before hover`, hiddenByDefaultFailures);
+  assert(hoverRevealFailures.length === 0, `${label} has scrollable areas without hover-revealed working scrollbars`, hoverRevealFailures);
+  assert(oversized.length === 0, `${label} has scrollbars thicker than the experiment-runs standard`, oversized);
   await page.mouse.move(1, 1);
   await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
   await page.waitForTimeout(40);
@@ -1483,8 +1513,25 @@ async function assertBottomTableHorizontalScroll(page, label, viewportName) {
   for (const target of targets) {
     await bottomTabs.nth(target.tabIndex).click();
     await page.waitForTimeout(180);
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(60);
+    const defaultRail = await page.evaluate(({ frameSelector }) => {
+      const frame = document.querySelector(frameSelector);
+      const rail = frame?.querySelector(".wide-table-rail");
+      if (!frame || !rail) return { missing: true };
+      const railStyle = getComputedStyle(rail);
+      return {
+        missing: false,
+        frameClassName: String(frame.className || ""),
+        railOpacity: Number.parseFloat(railStyle.opacity),
+        pointerEvents: railStyle.pointerEvents,
+      };
+    }, target);
+    assert(!defaultRail.missing, `${label} is missing the ${target.name} table custom rail`, defaultRail);
+    assert(defaultRail.railOpacity <= 0.1 && defaultRail.pointerEvents === "none", `${label} ${target.name} table rail is visible before hover`, defaultRail);
+
     await page.locator(`${target.frameSelector} .wide-table-scroll`).first().hover({ force: true });
-    await page.waitForTimeout(80);
+    await page.waitForTimeout(160);
 
     const report = await page.evaluate(({ frameSelector, tableSelector }) => {
       const frame = document.querySelector(frameSelector);
@@ -1501,6 +1548,7 @@ async function assertBottomTableHorizontalScroll(page, label, viewportName) {
       const thumbRect = thumb?.getBoundingClientRect();
       const nativeScrollbar = getComputedStyle(scroller, "::-webkit-scrollbar");
       const scrollerStyle = getComputedStyle(scroller);
+      const railStyle = rail ? getComputedStyle(rail) : null;
       const beforeEdge = getComputedStyle(frame, "::before");
       const afterEdge = getComputedStyle(frame, "::after");
       return {
@@ -1516,7 +1564,9 @@ async function assertBottomTableHorizontalScroll(page, label, viewportName) {
         scrollerClassName: String(scroller.className || ""),
         frameHeight: Math.round(frameRect.height),
         scrollerHeight: Math.round(scrollerRect.height),
-        railVisible: Boolean(rail && railRect.width > 40 && railRect.height >= 3),
+        railOpacity: railStyle ? Number.parseFloat(railStyle.opacity) : 0,
+        railPointerEvents: railStyle?.pointerEvents || "",
+        railVisible: Boolean(rail && railRect.width > 40 && railRect.height >= 3 && Number.parseFloat(railStyle?.opacity || "0") > 0.9),
         railHeight: railRect ? Math.round(railRect.height) : 0,
         trackHeight: trackRect ? Number(trackRect.height.toFixed(1)) : 0,
         thumbHeight: thumbRect ? Number(thumbRect.height.toFixed(1)) : 0,
@@ -1532,7 +1582,8 @@ async function assertBottomTableHorizontalScroll(page, label, viewportName) {
     assert(!report.missing, `${label} is missing the ${target.name} wide table frame`, report);
     assert(report.hasOverflow, `${label} ${target.name} table does not expose horizontal overflow for the scroll affordance`, report);
     assert(report.railVisible, `${label} ${target.name} table horizontal rail is not visible/clickable`, report);
-    assert(report.trackHeight <= 4.5 && report.thumbHeight <= 4.5, `${label} ${target.name} table custom rail is thicker than the unified scrollbar style`, report);
+    assert(report.railPointerEvents === "auto", `${label} ${target.name} table rail does not become interactive on hover`, report);
+    assert(report.trackHeight <= 3.5 && report.thumbHeight <= 3.5, `${label} ${target.name} table custom rail is thicker than the experiment-runs standard`, report);
     assert(report.railOverlaysScroller, `${label} ${target.name} table horizontal rail is reserving a second scrollbar row`, report);
     assert(report.railCount === 1, `${label} ${target.name} table has duplicate horizontal rails`, report);
     assert(report.frameClassName.split(/\s+/).includes("has-right-overflow"), `${label} ${target.name} table does not hint at hidden right-side columns`, report);
@@ -2206,6 +2257,7 @@ async function assertDialog(page, dialog, viewportName, label, consoleErrors = [
   });
   await page.waitForTimeout(60);
   await screenshot(page, `modals/${label}-${dialog.name}`);
+  await assertNativeScrollbars(page, `${label} ${dialog.name} dialog`, ".modal-backdrop");
 
   const scrollReport = await dialogElement.evaluate((element) => {
     const candidates = [element, ...Array.from(element.querySelectorAll("*"))];
