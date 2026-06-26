@@ -4678,7 +4678,7 @@ function ExperimentRuns({ t, runs, defaultModelProfile, selectedRun, onSelect, s
         </div>
       </div>
       <div className="runs-head">
-        <span>{t("panels.strategyRun", "Strategy / Run")}</span>
+        <span>{t("panels.strategyRunColumn", "Strategy / Run")}</span>
         <span>{t("panels.modelRoute", "Model")}</span>
         <span>{t("common.status", "Status")}</span>
         <span>{t("panels.return7d", "Ret. 7D")}</span>
@@ -4819,6 +4819,12 @@ function SimulationControls({
   const liveTrace = livePlan?.ai;
   const planConfidence = liveIntent?.confidence ?? liveTrace?.confidence;
   const planTTL = Number(liveIntent?.ttlSeconds || 0);
+  const isReplayMode = marketDataMode === "replay";
+  const guideCopy = mode === "Live"
+    ? t("panels.runGuideLive", "Live mode stays behind the guard. Finish vault, account sync, and validation before any exchange action.")
+    : mode === "Paper"
+      ? t("panels.runGuidePaper", "Paper mode uses a virtual account. It tests balances, positions, orders, and PnL without touching an exchange account.")
+      : t("panels.runGuideShadow", "Shadow mode reads market data and records AI decisions, risk checks, and simulated fills. No real order is sent.");
   const cycleExchange = () => setDataSource(dataSource === "Binance" ? "OKX" : "Binance");
   const cycleTimeframe = () => {
     const index = chartTimeframes.indexOf(timeframe);
@@ -4861,11 +4867,25 @@ function SimulationControls({
   return (
     <section className="panel controls-panel">
       <div className="panel-header">
-        <h2>{t("panels.simulationControls", "Simulation Controls")}</h2>
+        <h2>{t("panels.strategyRun", "Strategy Run")}</h2>
+      </div>
+      <div className="run-guide">
+        <div className="run-guide-copy">
+          <Activity size={14} />
+          <div>
+            <strong>{t("panels.runGuideTitle", "Run the strategy safely")}</strong>
+            <p>{guideCopy}</p>
+          </div>
+        </div>
+        <div className="run-flow" aria-label={t("panels.runFlow", "Run flow")}>
+          <span><i>1</i>{t("panels.runFlowMarket", "Read market")}</span>
+          <span><i>2</i>{t("panels.runFlowDecision", "AI decision")}</span>
+          <span><i>3</i>{t("panels.runFlowRecord", "Record result")}</span>
+        </div>
       </div>
       <div className="control-grid">
         <label>
-          <span>{t("common.market", "Market")}</span>
+          <span>{t("panels.marketSource", "Market source")}</span>
           <button className="select-button compact" type="button" onClick={cycleExchange} title={t("panels.switchExchange", "Switch exchange")} aria-label={t("panels.switchExchange", "Switch exchange")}>
             {dataSource}<ChevronDown size={13} />
           </button>
@@ -4877,13 +4897,13 @@ function SimulationControls({
           </button>
         </label>
         <label>
-          <span>{t("common.timeframe", "Timeframe")}</span>
+          <span>{t("panels.klinePeriod", "K-line period")}</span>
           <button className="select-button compact" type="button" onClick={cycleTimeframe} title={t("panels.switchTimeframe", "Switch timeframe")} aria-label={t("panels.switchTimeframe", "Switch timeframe")}>
             {timeframe}<ChevronDown size={13} />
           </button>
         </label>
         <label className="control-select-label">
-          <span>{t("common.data", "Data")}</span>
+          <span>{t("panels.dataMode", "Data mode")}</span>
           <div
             className="data-select"
             ref={dataSelectRef}
@@ -4936,7 +4956,7 @@ function SimulationControls({
       <div className="control-actions">
         <button className="pause-btn" type="button" onClick={onTogglePause}>
           {isPaused ? <Play size={15} /> : <Pause size={15} />}
-          {isPaused ? t("panels.resume", "RESUME") : t("panels.pause", "PAUSE")}
+          {isPaused ? t("panels.resumeFeed", "Resume feed") : t("panels.pauseFeed", "Pause feed")}
         </button>
         <button
           className={classNames("danger-btn", stopLocked && "blocked-action")}
@@ -5005,82 +5025,86 @@ function SimulationControls({
         </div>
       ) : (
         <>
-          <label className="speed-control">
-            <span>{t("panels.replaySpeed", "Replay Speed")}</span>
-            <input
-              type="range"
-              min="0.25"
-              max="8"
-              step="0.25"
-              value={replaySpeed}
-              onChange={(event) => setReplaySpeed(Number(event.target.value))}
-            />
-            <div className="speed-labels">
-              <span>0.25x</span>
-              <span>0.5x</span>
-              <strong>{replaySpeed.toFixed(replaySpeed % 1 === 0 ? 0 : 2)}x</strong>
-              <span>4x</span>
-              <span>8x</span>
-            </div>
-          </label>
-          <div className="jump-control">
-            <span>{t("panels.jumpTo", "Jump To")}</span>
-            <div
-              className="jump-select"
-              ref={jumpSelectRef}
-              onBlur={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) {
-                  setIsJumpOpen(false);
-                }
-              }}
-              onKeyDown={(event) => {
-                handleMenuListKeyDown(event, { container: jumpSelectRef.current, closeMenu: () => setIsJumpOpen(false) });
-              }}
-            >
-              <button
-                className={classNames("select-button compact", jumpDisabledReason && "blocked-action")}
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded={isJumpOpen}
-                aria-disabled={Boolean(jumpDisabledReason)}
-                title={jumpDisabledReason || jumpLabel}
-                onClick={() => {
-                  if (jumpDisabledReason) {
-                    onActionNotice(t("panels.jumpTo", "Jump To"), jumpDisabledReason);
-                    return;
-                  }
-                  setIsJumpOpen((value) => !value);
-                }}
-                onKeyDown={(event) => handleMenuTriggerKeyDown(event, openJumpMenu)}
-              >
-                <Clock3 size={13} />
-                <strong>{jumpLabel}</strong>
-                <ChevronDown size={13} />
-              </button>
-              <small>{replayPoint ? `${t("panels.replayCursor", "Replay cursor")} · ${replayPoint.tag}` : t("panels.replayPaused", "Replay waits for market data")}</small>
-              {isJumpOpen ? (
-                <div className="jump-menu" role="menu">
-                  {replayOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      className={option.value === replayPoint?.value ? "active" : ""}
-                      type="button"
-                      role="menuitem"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                      onReplayJump(option);
-                      setIsJumpOpen(false);
-                      focusMenuTrigger(jumpSelectRef.current);
-                    }}
-                    >
-                      <span>{option.label}</span>
-                      <small>{option.tag}</small>
-                    </button>
-                  ))}
+          {isReplayMode ? (
+            <>
+              <label className="speed-control">
+                <span>{t("panels.replaySpeed", "Replay Speed")}</span>
+                <input
+                  type="range"
+                  min="0.25"
+                  max="8"
+                  step="0.25"
+                  value={replaySpeed}
+                  onChange={(event) => setReplaySpeed(Number(event.target.value))}
+                />
+                <div className="speed-labels">
+                  <span>0.25x</span>
+                  <span>0.5x</span>
+                  <strong>{replaySpeed.toFixed(replaySpeed % 1 === 0 ? 0 : 2)}x</strong>
+                  <span>4x</span>
+                  <span>8x</span>
                 </div>
-              ) : null}
-            </div>
-          </div>
+              </label>
+              <div className="jump-control">
+                <span>{t("panels.jumpTo", "Jump To")}</span>
+                <div
+                  className="jump-select"
+                  ref={jumpSelectRef}
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      setIsJumpOpen(false);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    handleMenuListKeyDown(event, { container: jumpSelectRef.current, closeMenu: () => setIsJumpOpen(false) });
+                  }}
+                >
+                  <button
+                    className={classNames("select-button compact", jumpDisabledReason && "blocked-action")}
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={isJumpOpen}
+                    aria-disabled={Boolean(jumpDisabledReason)}
+                    title={jumpDisabledReason || jumpLabel}
+                    onClick={() => {
+                      if (jumpDisabledReason) {
+                        onActionNotice(t("panels.jumpTo", "Jump To"), jumpDisabledReason);
+                        return;
+                      }
+                      setIsJumpOpen((value) => !value);
+                    }}
+                    onKeyDown={(event) => handleMenuTriggerKeyDown(event, openJumpMenu)}
+                  >
+                    <Clock3 size={13} />
+                    <strong>{jumpLabel}</strong>
+                    <ChevronDown size={13} />
+                  </button>
+                  <small>{replayPoint ? `${t("panels.replayCursor", "Replay cursor")} · ${replayPoint.tag}` : t("panels.replayPaused", "Replay waits for market data")}</small>
+                  {isJumpOpen ? (
+                    <div className="jump-menu" role="menu">
+                      {replayOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          className={option.value === replayPoint?.value ? "active" : ""}
+                          type="button"
+                          role="menuitem"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            onReplayJump(option);
+                            setIsJumpOpen(false);
+                            focusMenuTrigger(jumpSelectRef.current);
+                          }}
+                        >
+                          <span>{option.label}</span>
+                          <small>{option.tag}</small>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          ) : null}
         </>
       )}
     </section>

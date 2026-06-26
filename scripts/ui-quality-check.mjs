@@ -964,6 +964,7 @@ async function assertLeftRailStack(page, label, viewportName, options = {}) {
       latency: rectFor(".latency-strip"),
       controlsContentOverflow: controlsRect ? Number((controlsContentBottom - controlsRect.bottom).toFixed(1)) : null,
       jumpToLatencyGap: jump && latency ? Number((latency.top - jump.bottom).toFixed(1)) : null,
+      controlsToLatencyGap: controlsRect && latency ? Number((latency.top - controlsRect.bottom).toFixed(1)) : null,
       latencyViewportGap: latency ? Number((window.innerHeight - latency.bottom).toFixed(1)) : null,
       latencyRailBottomGap: latency ? Number((rectFor(".left-rail").bottom - latency.bottom).toFixed(1)) : null,
       latencyWorkspaceBottomGap: latency ? Number((rectFor(".workspace").bottom - latency.bottom).toFixed(1)) : null,
@@ -984,9 +985,13 @@ async function assertLeftRailStack(page, label, viewportName, options = {}) {
       childOverlaps,
     };
   });
-  assert(report.controls && report.jump && report.latency, `${label} is missing left rail stack elements`, report);
+  assert(report.controls && report.latency, `${label} is missing left rail stack elements`, report);
   assert(report.controlsContentOverflow <= 1, `${label} controls panel content overflows its container`, report);
-  assert(report.jumpToLatencyGap >= 4, `${label} jump control overlaps the latency strip`, report);
+  if (report.jump) {
+    assert(report.jumpToLatencyGap >= 4, `${label} jump control overlaps the latency strip`, report);
+  } else {
+    assert(report.controlsToLatencyGap >= 4, `${label} controls panel overlaps the latency strip`, report);
+  }
   assert(report.latencyViewportGap >= 4, `${label} latency strip is too close to the viewport edge`, report);
   assert(Math.abs(report.latencyRailBottomGap) <= 2, `${label} latency strip does not align with the left rail bottom`, report);
   assert(Math.abs(report.latencyWorkspaceBottomGap) <= 2, `${label} left rail bottom no longer aligns with the workspace bottom`, report);
@@ -2084,14 +2089,16 @@ async function assertMenus(page, label) {
   const menus = [
     { name: "language", trigger: ".language-trigger", popup: ".language-menu" },
     { name: "data-mode", trigger: ".data-select > button", popup: ".data-menu" },
-    { name: "jump", trigger: ".jump-select > button", popup: ".jump-menu" },
+    { name: "jump", trigger: ".jump-select > button", popup: ".jump-menu", optional: true },
     { name: "log-settings", trigger: ".log-tools .icon-row button:first-child", popup: ".log-settings-menu" },
   ];
   const expectsSolidLightPopup = label.includes("-light-");
   for (const menu of menus) {
     await page.keyboard.press("Escape").catch(() => {});
     const trigger = page.locator(menu.trigger).first();
-    assert(await trigger.count(), `missing menu trigger: ${menu.name}`);
+    const triggerCount = await trigger.count();
+    if (!triggerCount && menu.optional) continue;
+    assert(triggerCount, `missing menu trigger: ${menu.name}`);
     await trigger.click();
     await page.waitForTimeout(160);
     assert(await page.locator(menu.popup).first().isVisible().catch(() => false), `menu did not open: ${menu.name}`);

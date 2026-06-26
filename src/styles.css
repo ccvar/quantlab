@@ -1599,11 +1599,97 @@ button.blocked-action:not(:disabled) {
   padding-bottom: 10px;
 }
 
+.run-guide {
+  margin: 6px 10px 5px;
+  border: 1px solid rgba(33, 212, 196, 0.16);
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(33, 212, 196, 0.07), rgba(33, 212, 196, 0.025));
+  display: grid;
+  gap: 5px;
+  padding: 6px 7px;
+}
+
+.run-guide-copy {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+}
+
+.run-guide-copy svg {
+  margin-top: 1px;
+  color: var(--teal);
+}
+
+.run-guide-copy strong,
+.run-guide-copy p {
+  min-width: 0;
+  margin: 0;
+}
+
+.run-guide-copy strong {
+  display: block;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.run-guide-copy p {
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.run-flow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.run-flow span {
+  min-width: 0;
+  height: 19px;
+  border: 1px solid rgba(132, 162, 174, 0.16);
+  border-radius: 5px;
+  background: rgba(5, 13, 17, 0.24);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-flow i {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: rgba(33, 212, 196, 0.12);
+  color: var(--teal);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 8px "IBM Plex Mono", monospace;
+  font-style: normal;
+}
+
 .control-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 8px 10px 6px;
+  gap: 5px 6px;
+  padding: 7px 10px 5px;
 }
 
 .control-grid label,
@@ -1698,11 +1784,11 @@ button.blocked-action:not(:disabled) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 5px;
-  padding: 0 10px 5px;
+  padding: 0 10px 4px;
 }
 
 .control-actions button {
-  height: 28px;
+  height: 27px;
   border: 1px solid var(--line);
   border-radius: 5px;
   color: var(--muted);
@@ -1735,14 +1821,14 @@ button.blocked-action:not(:disabled) {
 
 .autopilot-card {
   position: relative;
-  min-height: 82px;
-  margin: 0 10px 5px;
+  min-height: 74px;
+  margin: 0 10px 4px;
   border: 1px solid rgba(132, 162, 174, 0.2);
   border-radius: 6px;
   background: rgba(5, 13, 17, 0.42);
-  padding: 5px 6px;
+  padding: 4px 6px;
   display: grid;
-  gap: 4px;
+  gap: 3px;
   overflow: hidden;
 }
 
@@ -1835,7 +1921,7 @@ button.blocked-action:not(:disabled) {
 }
 
 .autopilot-toggle {
-  height: 26px;
+  height: 24px;
   border: 1px solid rgba(33, 212, 196, 0.3);
   border-radius: 5px;
   background: rgba(33, 212, 196, 0.08);
@@ -1919,7 +2005,7 @@ button.blocked-action:not(:disabled) {
 
 .speed-control,
 .jump-control {
-  padding: 0 10px 5px;
+  padding: 7px 8px 5px;
 }
 
 .jump-control {
@@ -6461,6 +6547,20 @@ input[type="range"] {
 :root[data-theme="light"] .autopilot-head,
 :root[data-theme="light"] .form-title {
   color: #506a76;
+}
+
+:root[data-theme="light"] .run-guide {
+  border-color: rgba(8, 159, 149, 0.18);
+  background: linear-gradient(180deg, rgba(226, 247, 245, 0.72), rgba(255, 255, 255, 0.62));
+}
+
+:root[data-theme="light"] .run-guide-copy p {
+  color: #607783;
+}
+
+:root[data-theme="light"] .run-flow span {
+  border-color: rgba(99, 126, 138, 0.12);
+  background: rgba(255, 255, 255, 0.68);
 }
 
 :root[data-theme="light"] .data-table thead th,
