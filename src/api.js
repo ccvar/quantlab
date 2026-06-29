@@ -1,7 +1,7 @@
 import { fallbackLabState } from "./fallbackData.js";
 
 const defaultAPIBase =
-  typeof window !== "undefined" && window.location.port !== "5173"
+  typeof window !== "undefined"
     ? window.location.origin
     : "http://127.0.0.1:8787";
 const API_BASE = import.meta.env.VITE_API_BASE || defaultAPIBase;

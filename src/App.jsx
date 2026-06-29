@@ -94,19 +94,28 @@ function formatMoney(value) {
   return moneyFormat.format(value);
 }
 
+function normalizeSignedValue(value, digits = 2) {
+  const number = Number(value) || 0;
+  const threshold = 0.5 * (10 ** -digits);
+  return Math.abs(number) < threshold ? 0 : number;
+}
+
 function formatSignedMoney(value) {
-  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  return `${sign}${moneyFormat.format(Math.abs(value || 0))}`;
+  const normalized = normalizeSignedValue(value, 2);
+  const sign = normalized > 0 ? "+" : normalized < 0 ? "-" : "";
+  return `${sign}${moneyFormat.format(Math.abs(normalized))}`;
 }
 
 function formatSignedPct(value) {
-  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  return `${sign}${Math.abs(value || 0).toFixed(2)}%`;
+  const normalized = normalizeSignedValue(value, 2);
+  const sign = normalized > 0 ? "+" : normalized < 0 ? "-" : "";
+  return `${sign}${Math.abs(normalized).toFixed(2)}%`;
 }
 
 function formatSignedNumber(value, digits = 1) {
-  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  return `${sign}${Math.abs(value || 0).toFixed(digits)}`;
+  const normalized = normalizeSignedValue(value, digits);
+  const sign = normalized > 0 ? "+" : normalized < 0 ? "-" : "";
+  return `${sign}${Math.abs(normalized).toFixed(digits)}`;
 }
 
 function formatMarketDataSource(value) {
@@ -2738,6 +2747,7 @@ export function App() {
         <TopBar
           t={t}
           meta={labState.meta}
+          paperAccount={paperAccount}
           mode={mode}
           modeTone={modeTone}
           setMode={handleModeChange}
@@ -4511,6 +4521,7 @@ function ThemeToggle({ t, theme, onToggle }) {
 function TopBar({
   t,
   meta,
+  paperAccount,
   mode,
   modeTone,
   setMode,
@@ -4530,6 +4541,10 @@ function TopBar({
   killSwitch,
   onOpenLiveGuard,
 }) {
+  const simCapital = Number(paperAccount?.startingCapitalUsdt ?? meta.simCapital ?? 0);
+  const simPnl = normalizeSignedValue(Number(paperAccount?.totalPnlUsdt ?? meta.dailyPnl ?? 0), 2);
+  const simPnlPct = normalizeSignedValue(Number(paperAccount?.returnPct ?? meta.dailyPnlPct ?? 0), 2);
+  const simDrawdown = simPnlPct < 0 ? simPnlPct : 0;
   return (
     <header className="top-bar">
       <div className="top-section source-section">
@@ -4578,9 +4593,9 @@ function TopBar({
         </button>
       </div>
 
-      <MetricTile label={t("top.simCapital", "Sim Capital")} value={formatMoney(meta.simCapital)} unit="USDT" density="wide" />
-      <MetricTile label={t("top.dailyPnl", "Daily PnL")} value={`+${formatMoney(meta.dailyPnl)}`} unit="USDT" sub={`+${meta.dailyPnlPct.toFixed(2)}%`} tone="positive" density="wide" />
-      <MetricTile label={t("top.dailyDrawdown", "Daily Drawdown")} value={`${meta.dailyDrawdown.toFixed(2)}%`} tone="negative" />
+      <MetricTile label={t("top.simCapital", "Sim Capital")} value={formatMoney(simCapital)} unit="USDT" density="wide" />
+      <MetricTile label={t("top.dailyPnl", "Sim PnL")} value={formatSignedMoney(simPnl)} unit="USDT" sub={formatSignedPct(simPnlPct)} tone={simPnl >= 0 ? "positive" : "negative"} density="wide" />
+      <MetricTile label={t("top.dailyDrawdown", "Sim Drawdown")} value={`${simDrawdown.toFixed(2)}%`} tone={simDrawdown < 0 ? "negative" : ""} />
 
       <button
         className={classNames("stop-all", isStopped && "active")}
@@ -5773,7 +5788,7 @@ function BottomPanel({
           {active === "Orders" && <OrdersTable t={t} rows={orders} />}
           {active === "AI Steps" && <AutopilotStepsView t={t} rows={autopilotSteps} />}
           {active === "Metrics" && <MetricsView t={t} features={features} verdict={verdict} performance={performance} />}
-          {active === "Risk" && <RiskView t={t} profile={riskProfile} strategyProfile={strategyProfile} verdict={verdict} events={allEvents} mode={mode} meta={meta} />}
+          {active === "Risk" && <RiskView t={t} profile={riskProfile} strategyProfile={strategyProfile} verdict={verdict} events={allEvents} mode={mode} meta={meta} paperAccount={paperAccount} />}
           {active === "Trades" && (
             <PaperLedgerView
               t={t}
@@ -5929,9 +5944,10 @@ function MetricsView({ t, features = [], verdict = {}, performance = [] }) {
   );
 }
 
-function RiskView({ t, profile = defaultRiskProfile, strategyProfile = defaultStrategyProfile, verdict = {}, events = [], mode, meta }) {
+function RiskView({ t, profile = defaultRiskProfile, strategyProfile = defaultStrategyProfile, verdict = {}, events = [], mode, meta, paperAccount }) {
   const confidence = Number(verdict?.confidence || 0) / 100;
-  const dailyDrawdown = Math.abs(Number(meta?.dailyDrawdown || 0));
+  const paperReturn = Number(paperAccount?.returnPct ?? Number.NaN);
+  const dailyDrawdown = Number.isFinite(paperReturn) ? Math.abs(Math.min(0, paperReturn)) : Math.abs(Number(meta?.dailyDrawdown || 0));
   const orderSizeUsdt = Number(strategyProfile?.orderSizeUsdt || defaultStrategyProfile.orderSizeUsdt || 0);
   const riskEvents = events.filter((event) => String(event.type || "").includes("Risk") || event.level === "danger");
   const checks = [

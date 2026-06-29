@@ -18,3 +18,4 @@ When implementing from a selected generated mock, treat that image as the source
 - OKX Demo Trading uses the common `https://www.okx.com` API host with `x-simulated-trading: 1`; do not hard-code regional OKX domains as the default.
 - Destructive Vault actions should use subdued default controls and require an in-app second confirmation before deleting local encrypted credentials.
 - Strategy run controls should be novice-friendly: explain the safe business flow near the controls, use action-oriented labels, and hide replay/debug controls behind a secondary affordance unless replay data is active.
+- Simulation account, top summary metrics, and risk checks should use the local paper ledger snapshot instead of seeded dashboard values.

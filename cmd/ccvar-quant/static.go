@@ -29,13 +29,37 @@ func mountWeb(mux *http.ServeMux) error {
 		}
 		cleanPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if cleanPath == "." || cleanPath == "" {
+			setWebCacheHeaders(w, cleanPath)
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 		if _, err := fs.Stat(webFS, cleanPath); err != nil {
+			if isStaticFilePath(cleanPath) {
+				setWebCacheHeaders(w, cleanPath)
+				http.NotFound(w, r)
+				return
+			}
+			setWebCacheHeaders(w, "index.html")
 			r.URL.Path = "/"
+			fileServer.ServeHTTP(w, r)
+			return
 		}
+		setWebCacheHeaders(w, cleanPath)
 		fileServer.ServeHTTP(w, r)
 	})
 	return nil
+}
+
+func isStaticFilePath(cleanPath string) bool {
+	return strings.HasPrefix(cleanPath, "assets/") || path.Ext(cleanPath) != ""
+}
+
+func setWebCacheHeaders(w http.ResponseWriter, cleanPath string) {
+	if cleanPath == "" || cleanPath == "." || cleanPath == "index.html" {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
 }

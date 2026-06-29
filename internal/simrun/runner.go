@@ -19,6 +19,7 @@ type Runner struct {
 	Registry         exchange.Registry
 	Risk             risk.Engine
 	RiskProvider     func(context.Context) (risk.Limits, error)
+	AccountProvider  func(context.Context, core.MarketSnapshot) (core.AccountState, error)
 	Strategy         StrategyConfig
 	StrategyProvider func(context.Context) (StrategyConfig, error)
 	AI               ai.Engine
@@ -111,12 +112,9 @@ func (runner Runner) Step(ctx context.Context, exchangeName, symbol string) (Res
 	if err != nil {
 		return Result{}, err
 	}
-	account := core.AccountState{
-		EquityUSDT:         100000,
-		AvailableUSDT:      20000,
-		DailyDrawdownPct:   -0.73,
-		OpenNotionalUSDT:   5000,
-		SymbolExposureUSDT: map[string]float64{snapshot.Symbol: 2500},
+	account, err := runner.account(ctx, snapshot)
+	if err != nil {
+		return Result{}, err
 	}
 	aiDecision, err := runner.aiEngine().GenerateIntent(ctx, ai.Context{
 		Account: account,
@@ -198,6 +196,26 @@ func (runner Runner) riskEngine(ctx context.Context) (risk.Engine, error) {
 		return risk.Engine{}, err
 	}
 	return risk.NewEngine(limits), nil
+}
+
+func (runner Runner) account(ctx context.Context, snapshot core.MarketSnapshot) (core.AccountState, error) {
+	if runner.AccountProvider != nil {
+		account, err := runner.AccountProvider(ctx, snapshot)
+		if err != nil {
+			return core.AccountState{}, err
+		}
+		if account.SymbolExposureUSDT == nil {
+			account.SymbolExposureUSDT = map[string]float64{}
+		}
+		return account, nil
+	}
+	return core.AccountState{
+		EquityUSDT:         100000,
+		AvailableUSDT:      100000,
+		DailyDrawdownPct:   0,
+		OpenNotionalUSDT:   0,
+		SymbolExposureUSDT: map[string]float64{},
+	}, nil
 }
 
 func (runner Runner) aiEngine() ai.Engine {

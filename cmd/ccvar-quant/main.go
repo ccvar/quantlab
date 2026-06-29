@@ -113,6 +113,9 @@ func main() {
 	simRunner := simrun.New(registry)
 	simRunner.RiskProvider = riskProvider
 	simRunner.StrategyProvider = strategyProvider
+	simRunner.AccountProvider = func(ctx context.Context, snapshot core.MarketSnapshot) (core.AccountState, error) {
+		return buildPaperAccountState(ctx, store, snapshot.Symbol)
+	}
 	simRunner.AI = ai.NewLocalPolicy()
 	guard := liveguard.New()
 	killSwitch := killswitch.New()
@@ -2117,6 +2120,54 @@ func buildPaperAccountSnapshot(ctx context.Context, store *storage.Store) (paper
 		return paperaccount.Snapshot{}, err
 	}
 	return paperaccount.Build(records), nil
+}
+
+func buildPaperAccountState(ctx context.Context, store *storage.Store, symbol string) (core.AccountState, error) {
+	records, err := store.ListPaperExecutions(ctx, paperAccountRecordLimit)
+	if err != nil {
+		return core.AccountState{}, err
+	}
+	snapshot := paperaccount.Build(records)
+	return accountStateFromPaperSnapshot(snapshot, symbol), nil
+}
+
+func accountStateFromPaperSnapshot(snapshot paperaccount.Snapshot, symbol string) core.AccountState {
+	exposureBySymbol := map[string]float64{}
+	for _, position := range snapshot.Positions {
+		positionSymbol := strings.ToUpper(strings.TrimSpace(position.Symbol))
+		if positionSymbol == "" {
+			continue
+		}
+		notional := position.NotionalUSDT
+		if strings.EqualFold(position.Side, "short") {
+			notional = -notional
+		}
+		exposureBySymbol[positionSymbol] += notional
+	}
+	if symbol = strings.ToUpper(strings.TrimSpace(symbol)); symbol != "" {
+		if _, ok := exposureBySymbol[symbol]; !ok {
+			exposureBySymbol[symbol] = 0
+		}
+	}
+	equity := snapshot.EquityUSDT
+	if equity <= 0 {
+		equity = paperaccount.StartingCapitalUSDT
+	}
+	return core.AccountState{
+		EquityUSDT:         equity,
+		AvailableUSDT:      snapshot.CashUSDT,
+		DailyDrawdownPct:   paperDrawdownPct(snapshot),
+		OpenNotionalUSDT:   snapshot.OpenNotionalUSDT,
+		SymbolExposureUSDT: exposureBySymbol,
+		ConsecutiveLosses:  0,
+	}
+}
+
+func paperDrawdownPct(snapshot paperaccount.Snapshot) float64 {
+	if snapshot.ReturnPct >= 0 {
+		return 0
+	}
+	return snapshot.ReturnPct
 }
 
 func simulationMode(value string) string {
